@@ -1,0 +1,2526 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#08050a">
+<title>指尖花 · Fingertip Bloom</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3CradialGradient id='g' cx='50%25' cy='50%25'%3E%3Cstop offset='0' stop-color='%23ffe6f0'/%3E%3Cstop offset='1' stop-color='%23e0559b'/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect width='32' height='32' fill='%231a0a14'/%3E%3Cg fill='url(%23g)'%3E%3Cellipse cx='16' cy='9' rx='3.4' ry='7'/%3E%3Cellipse cx='16' cy='23' rx='3.4' ry='7'/%3E%3Cellipse cx='9' cy='16' rx='7' ry='3.4'/%3E%3Cellipse cx='23' cy='16' rx='7' ry='3.4'/%3E%3Cellipse cx='11' cy='11' rx='3' ry='6' transform='rotate(-45 11 11)'/%3E%3Cellipse cx='21' cy='21' rx='3' ry='6' transform='rotate(-45 21 21)'/%3E%3Cellipse cx='21' cy='11' rx='3' ry='6' transform='rotate(45 21 11)'/%3E%3Cellipse cx='11' cy='21' rx='3' ry='6' transform='rotate(45 11 21)'/%3E%3C/g%3E%3Ccircle cx='16' cy='16' r='3.2' fill='%23ffd9a0'/%3E%3C/svg%3E">
+<!-- 让浏览器解析页面时就开始拉模型；不用等 90KB 脚本解析与粒子初始化结束才发请求 -->
+<link rel="modulepreload" href="./vendor/vision_bundle.mjs">
+<link rel="preload" href="./vendor/hand_landmarker.task" as="fetch" type="application/octet-stream" crossorigin="anonymous">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{width:100%;height:100%;overflow:hidden;background:#070409}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    color:#f3e9ee;
+    -webkit-font-smoothing:antialiased;
+    cursor:crosshair;
+  }
+  #gl{position:fixed;inset:0;width:100%;height:100%;display:block;z-index:1}
+
+  /* ---------- UI ---------- */
+  .ui{position:fixed;inset:0;z-index:10;pointer-events:none;opacity:0;transition:opacity 1.2s ease .3s}
+  .ui.on{opacity:1}
+  .ui .clickable{pointer-events:auto}
+
+  /* 顶部 */
+  .top{position:absolute;top:0;left:0;right:0;display:flex;align-items:flex-start;justify-content:space-between;padding:26px 32px}
+  .brand{display:flex;align-items:center;gap:11px}
+  .brand svg{width:22px;height:22px;flex:none;opacity:.92}
+  .brand .t{font-size:19px;font-weight:600;letter-spacing:.06em;color:#fff5f8;line-height:1;white-space:nowrap}
+  .brand .s{margin-left:10px;font-size:9.5px;letter-spacing:.34em;color:rgba(255,220,232,.34);
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:500;transform:translateY(1px)}
+
+  .badge{display:flex;align-items:center;gap:8px;padding:8px 15px 8px 13px;border-radius:999px;
+    background:rgba(255,190,210,.045);border:1px solid rgba(255,175,200,.14);
+    backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    font-size:11.5px;letter-spacing:.1em;color:rgba(255,226,236,.8);white-space:nowrap}
+  .dot{width:6px;height:6px;border-radius:50%;background:#ff5f8a;flex:none;
+    box-shadow:0 0 9px 1px rgba(255,80,125,.85);transition:background .5s,box-shadow .5s}
+  .dot.calm{background:#c47bd8;box-shadow:0 0 9px 1px rgba(180,110,220,.7)}
+
+  /* 左侧手势卡 */
+  .hud{position:absolute;left:32px;top:50%;transform:translateY(-50%);
+    display:flex;align-items:center;gap:12px;padding:11px 20px 11px 12px;border-radius:999px;
+    background:rgba(255,235,242,.035);border:1px solid rgba(255,190,212,.11);
+    backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    transform:translateY(-50%)}
+  .hud.on{}
+  .hud .ico{width:30px;height:30px;border-radius:50%;flex:none;display:grid;place-items:center;
+    background:radial-gradient(circle at 35% 30%,rgba(255,140,175,.22),rgba(120,40,90,.28));
+    border:1px solid rgba(255,160,195,.18)}
+  .hud .ico svg{width:15px;height:15px;stroke:#ffb0c8}
+  .hud .m{font-size:12.5px;letter-spacing:.12em;color:#ffe4ee;line-height:1.45}
+  .hud .c{font-size:9.5px;letter-spacing:.1em;color:rgba(255,205,222,.42);
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+
+  /* 摄像头预览 */
+  /* 摄像头预览：默认不显示，只有真正拿到摄像头画面才亮出来
+     （原来 .cam.on 在 CSS 里没有任何规则，降级后这里会留一个空黑框） */
+  .cam{position:absolute;right:32px;bottom:78px;width:300px;height:200px;border-radius:14px;overflow:hidden;
+    border:1px solid rgba(255,130,165,.26);background:#100a0f;display:none;
+    box-shadow:0 14px 44px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.02) inset}
+  .cam.on{display:block}
+  .cam canvas{width:100%;height:100%;display:block}
+  .cam .lb{position:absolute;top:9px;left:11px;display:flex;align-items:center;gap:6px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:8.5px;letter-spacing:.2em;
+    color:rgba(255,235,242,.82);text-shadow:0 1px 4px rgba(0,0,0,.8)}
+  .cam .lb i{width:4px;height:4px;border-radius:50%;background:#ff5f8a;display:block;
+    box-shadow:0 0 7px 1px rgba(255,80,125,.9);animation:blink 1.9s infinite}
+  /* 摄像头拿不到画面时的兜底提示（可点重试） */
+  .cam .cnotice{position:absolute;inset:0;display:none;place-items:center;padding:10px;
+    text-align:center;font-size:10.5px;line-height:1.7;letter-spacing:.04em;
+    color:#ffd9e6;background:rgba(12,5,10,.72);cursor:pointer;pointer-events:auto}
+  .cam .cnotice.on{display:grid}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.28}}
+
+  /* 底部提示 */
+  .hint{position:absolute;left:50%;bottom:26px;transform:translateX(-50%);display:flex;align-items:center;gap:34px}
+  .hint .it{display:flex;align-items:center;gap:9px;opacity:.55;transition:opacity .4s}
+  .hint .it.act{opacity:1}
+  .hint .it svg{width:17px;height:17px;flex:none;stroke:rgba(255,215,230,.8);fill:none;stroke-width:1.3}
+  .hint .it .k{font-size:11px;letter-spacing:.14em;color:#ffe0ea;line-height:1.3;white-space:nowrap}
+  .hint .it .d{font-size:8.5px;letter-spacing:.14em;color:rgba(255,200,218,.36);
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin-top:2px}
+  .hint .sep{width:1px;height:22px;background:linear-gradient(to bottom,transparent,rgba(255,180,205,.16),transparent)}
+
+  /* 左下按钮 */
+  .tools{position:absolute;left:32px;bottom:26px;display:flex;gap:9px}
+  .btn{display:flex;align-items:center;gap:6px;padding:7px 13px;border-radius:8px;
+    background:rgba(255,235,242,.035);border:1px solid rgba(255,190,212,.12);
+    font-size:10px;letter-spacing:.12em;color:rgba(255,225,235,.62);cursor:pointer;
+    transition:.25s;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+  .btn:hover{background:rgba(255,150,185,.11);color:#ffe8f0;border-color:rgba(255,160,195,.28)}
+  .btn.on{background:rgba(255,120,160,.14);color:#ffd9e6;border-color:rgba(255,140,175,.34)}
+  .btn svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:1.4}
+
+  /* 音乐按钮：播放中有呼吸光点 */
+  #btnMusic .eq{display:inline-flex;align-items:flex-end;gap:1.5px;height:9px;margin-left:1px}
+  #btnMusic .eq i{width:1.6px;border-radius:1px;background:currentColor;opacity:.55;
+    animation:eqBar 1.1s ease-in-out infinite}
+  #btnMusic .eq i:nth-child(1){height:4px;animation-delay:0s}
+  #btnMusic .eq i:nth-child(2){height:8px;animation-delay:.18s}
+  #btnMusic .eq i:nth-child(3){height:5px;animation-delay:.36s}
+  @keyframes eqBar{0%,100%{transform:scaleY(.45);opacity:.4}50%{transform:scaleY(1);opacity:.95}}
+  #btnMusic.playing{color:#ffd9e6;border-color:rgba(255,140,175,.34)}
+  #btnMusic.playing svg{stroke:#ff9dbb}
+  /* 自动播放被浏览器拦下时，轻轻闪一下提示可以点 */
+  #btnMusic.needtap{animation:needTap 1.5s ease-in-out infinite}
+  @keyframes needTap{
+    0%,100%{border-color:rgba(255,190,212,.12);color:rgba(255,225,235,.62);box-shadow:none}
+    50%{border-color:rgba(255,140,175,.62);color:#ffd9e6;box-shadow:0 0 14px rgba(255,120,160,.38)}
+  }
+
+  /* 自动播放被浏览器拦下时的提示条
+     —— 只让按钮闪几下，绝大多数人根本不会注意到（尤其是 iOS） */
+  .mtip{position:fixed;left:50%;bottom:104px;z-index:45;
+    transform:translateX(-50%) translateY(16px);
+    display:none;align-items:center;gap:9px;padding:10px 19px 10px 15px;border-radius:999px;
+    background:rgba(40,14,26,.88);border:1px solid rgba(255,140,175,.42);
+    box-shadow:0 10px 34px rgba(0,0,0,.55),0 0 22px rgba(255,110,155,.18);
+    -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+    font-size:11.5px;letter-spacing:.1em;color:#ffe2ec;white-space:nowrap;
+    opacity:0;transition:opacity .45s ease,transform .45s cubic-bezier(.16,1,.3,1)}
+  .mtip.on{display:flex;opacity:1;transform:translateX(-50%) translateY(0)}
+  .mtip svg{width:14px;height:14px;flex:none;stroke:#ff9dbb;fill:none;stroke-width:1.5}
+  .mtip b{color:#fff;font-weight:600}
+  .mtip::after{content:'';position:absolute;inset:-1px;border-radius:999px;pointer-events:none;
+    animation:mtipPulse 2.4s ease-out infinite}
+  @keyframes mtipPulse{
+    0%{box-shadow:0 0 0 0 rgba(255,120,160,.42)}
+    70%{box-shadow:0 0 0 15px rgba(255,120,160,0)}
+    100%{box-shadow:0 0 0 0 rgba(255,120,160,0)}
+  }
+
+  /* 换色按钮：前面的小色点就是当前花色 */
+  #btnHue .swatch{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none;
+    background:#ff7fa4;box-shadow:0 0 7px rgba(255,127,164,.75);
+    transition:background .7s ease, box-shadow .7s ease}
+
+  /* ---------- 保存图片 · 预览层 ---------- */
+  /* 手机上没有"下载"这回事：iOS 的 <a download> 对 data URL 直接无效，
+     微信内置浏览器也禁下载。唯一全平台通用的做法是「长按图片 → 存到相册」，
+     所以点保存后先把图铺出来给用户长按。 */
+  .shot{position:fixed;inset:0;z-index:60;display:none;place-items:center;
+    background:radial-gradient(ellipse 80% 70% at 50% 45%, rgba(26,12,22,.94), rgba(4,2,6,.97));
+    backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);
+    padding:20px;opacity:0;transition:opacity .3s ease}
+  .shot.on{display:grid;opacity:1}
+  .shot .box{display:flex;flex-direction:column;align-items:center;gap:14px;
+    max-width:100%;max-height:100%}
+  .shot img{max-width:100%;max-height:calc(100vh - 176px);max-height:calc(100dvh - 176px);
+    width:auto;height:auto;display:block;border-radius:10px;
+    box-shadow:0 26px 72px rgba(0,0,0,.72),0 0 0 1px rgba(255,150,185,.18);
+    /* 关键：这几个属性绝不能写成 none，否则 iOS / 微信里长按呼不出系统菜单 */
+    -webkit-touch-callout:default;
+    -webkit-user-select:auto;user-select:auto;pointer-events:auto;
+    animation:shotIn .5s cubic-bezier(.16,1,.3,1) both}
+  @keyframes shotIn{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}
+  .shot .tip{display:flex;align-items:center;gap:8px;font-size:12px;letter-spacing:.1em;
+    color:rgba(255,228,238,.9);text-align:center;line-height:1.6}
+  .shot .tip b{color:#ffb8cf;font-weight:600}
+  .shot .tip svg{width:15px;height:15px;flex:none;stroke:#ff9dbb;fill:none;stroke-width:1.4}
+  .shot .acts{display:flex;gap:10px;margin-top:2px}
+  .shot .sbtn{padding:9px 20px;border-radius:9px;font-size:11.5px;letter-spacing:.12em;
+    color:rgba(255,228,238,.86);background:rgba(255,150,185,.11);
+    border:1px solid rgba(255,160,195,.3);cursor:pointer;transition:.22s;
+    -webkit-user-select:none;user-select:none}
+  .shot .sbtn:active{transform:scale(.96)}
+  .shot .sbtn.ghost{background:rgba(255,235,242,.04);border-color:rgba(255,190,212,.14);
+    color:rgba(255,225,235,.58)}
+
+  /* 载入 / 提示 */
+  .veil{position:fixed;inset:0;z-index:40;display:grid;place-items:center;
+    background:radial-gradient(ellipse 70% 60% at 50% 42%, #170b14 0%, #0a0610 55%, #050308 100%);
+    transition:opacity 1s ease;text-align:center;padding:32px}
+  .veil.gone{opacity:0;pointer-events:none}
+  .veil .in{max-width:430px}
+  .veil .rt{width:9px;height:9px;margin:0 auto 26px;border-radius:50%;position:relative;
+    background:radial-gradient(circle,#fff2f6,#ff5f8a 70%);
+    box-shadow:0 0 22px 5px rgba(255,90,140,.55);
+    animation:pulse 1.9s cubic-bezier(.45,0,.55,1) infinite}
+  .veil .rt::before,.veil .rt::after{content:'';position:absolute;inset:-11px;border-radius:50%;
+    border:1px solid rgba(255,140,175,.42);animation:ripple 2.6s cubic-bezier(.2,.6,.4,1) infinite}
+  .veil .rt::after{animation-delay:1.3s}
+  @keyframes pulse{0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(1.35);opacity:1}}
+  @keyframes ripple{0%{transform:scale(.45);opacity:.95}100%{transform:scale(3.4);opacity:0}}
+  .veil h1{font-size:17px;font-weight:500;letter-spacing:.18em;color:rgba(255,232,240,.92);margin-bottom:16px}
+  .veil p{font-size:12.5px;letter-spacing:.05em;line-height:1.95;color:rgba(255,208,224,.62);
+    white-space:pre-line;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .veil .go{margin-top:22px;display:inline-flex;align-items:center;gap:8px;padding:10px 22px;border-radius:999px;
+    background:rgba(255,120,160,.1);border:1px solid rgba(255,140,175,.3);color:#ffd6e3;
+    font-size:11px;letter-spacing:.16em;cursor:pointer;transition:.25s}
+  .veil .go:hover{background:rgba(255,120,160,.2);border-color:rgba(255,150,185,.5)}
+  .veil .go.alt{background:transparent;border-color:rgba(255,140,175,.18);color:rgba(255,214,227,.55);
+    margin-top:10px;font-size:10px}
+  .veil .go.alt:hover{color:#ffd6e3;border-color:rgba(255,150,185,.4)}
+  .veil .acts{display:flex;flex-direction:column;align-items:center}
+
+  /* 电脑上打开时，顺手把「手机访问」地址亮出来（服务端 /__lanip 提供） */
+  .lanhint{display:none;margin-top:26px;padding-top:18px;border-top:1px solid rgba(255,160,195,.1);
+    font-size:11px;line-height:1.9;letter-spacing:.04em;color:rgba(255,205,222,.46);
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .lanhint.on{display:block}
+  .lanhint b{display:inline-block;margin-top:3px;color:#ffb8cf;font-weight:500;font-size:13px;
+    letter-spacing:.02em;-webkit-user-select:all;user-select:all}
+
+  /* ---------- 错落入场 ---------- */
+  @keyframes riseIn{
+    from{opacity:0;translate:0 14px;filter:blur(5px)}
+    to{opacity:1;translate:0 0;filter:blur(0)}
+  }
+  .ui.on .brand{animation:riseIn .9s cubic-bezier(.16,1,.3,1) .05s both}
+  .ui.on .badge{animation:riseIn .9s cubic-bezier(.16,1,.3,1) .18s both}
+  .ui.on .hud{animation:riseIn .9s cubic-bezier(.16,1,.3,1) .34s both}
+  .ui.on .cam{animation:riseIn .9s cubic-bezier(.16,1,.3,1) .46s both}
+  .ui.on .hint{animation:riseIn .9s cubic-bezier(.16,1,.3,1) .58s both}
+  .ui.on .tools{animation:riseIn .9s cubic-bezier(.16,1,.3,1) .70s both}
+
+  @media (prefers-reduced-motion:reduce){
+    .ui.on .brand,.ui.on .badge,.ui.on .hud,.ui.on .cam,.ui.on .hint,.ui.on .tools{animation:none;opacity:1}
+  }
+
+  @media (max-width:820px){
+    .top{padding:16px 16px}
+    .brand .t{font-size:15px}.brand .s{font-size:7.5px;letter-spacing:.24em}
+    .brand svg{width:17px;height:17px}
+    .badge{font-size:9.5px;padding:6px 11px}
+    .hud{left:16px;top:auto;bottom:118px;transform:none;padding:8px 14px 8px 9px;gap:9px}
+    .hud.on{transform:none}
+    .hud .ico{width:24px;height:24px}.hud .m{font-size:11px}.hud .c{font-size:8.5px}
+    /* 摄像头预览：手机上原来只有 118×80，人脸小得看不清。
+       放大到 4:3 的 164×123 —— 顺便修掉拉伸变形（原来是 1.48:1，视频是 4:3） */
+    .cam{right:12px;top:54px;bottom:auto;width:164px;height:123px;border-radius:11px}
+    .cam .lb{font-size:7px;top:6px;left:8px;gap:4px}
+    /* 提示条要躲开左下角「等待手势」那个 hud（它在 bottom:118px），否则会压在一起 */
+    .mtip{bottom:176px;font-size:11px;letter-spacing:.06em;padding:9px 16px 9px 13px}
+    .hint{gap:16px;bottom:70px}
+    .hint .it .k{font-size:9.5px}.hint .it .d{display:none}
+    .hint .it svg{width:13px;height:13px}
+    .hint .sep{height:16px}
+    .tools{left:16px;bottom:18px;gap:7px}
+    .btn{font-size:9px;padding:7px 11px}
+    /* 保存预览层：手机上留出更多图幅 */
+    .shot{padding:14px}
+    .shot img{max-height:calc(100vh - 156px);max-height:calc(100dvh - 156px)}
+    .shot .tip{font-size:11px;letter-spacing:.06em}
+    .shot .sbtn{padding:9px 16px;font-size:11px}
+  }
+  /* 横屏手机：高度只有 390 左右，底部放不下两行，hint 必须上移 */
+  @media (max-height:560px) and (orientation:landscape){
+    .cam{width:168px;height:126px;top:auto;bottom:70px}
+    .mtip{bottom:100px}
+    .hint{bottom:58px;gap:22px}
+    .hint .it .d{display:none}
+    .hint .it .k{font-size:9.5px}
+    .hint .it svg{width:13px;height:13px}
+    .hint .sep{height:16px}
+    .hud{display:none}
+    .tools{left:16px;bottom:14px;gap:7px}
+    .btn{font-size:9px;padding:7px 11px}
+  }
+  /* 窄屏（360 / 375）：5 个按钮并排会贴到右边缘，收紧一档 */
+  @media (max-width:379px){
+    .tools{left:12px;bottom:16px;gap:5px}
+    .btn{padding:7px 8px;font-size:8.5px;letter-spacing:.06em;gap:4px}
+    .btn svg{width:10px;height:10px}
+    .hint{bottom:66px;gap:11px}
+    .hint .it{gap:6px}
+    .hint .it .k{font-size:9px;letter-spacing:.06em}
+    .hint .it svg{width:11px;height:11px}
+    .brand .s{display:none}   /* 320 这种宽度放不下副标题 */
+    .brand .t{font-size:14px}
+    /* 窄屏上 164 宽会占到一半屏幕，收一档 */
+    .cam{width:148px;height:111px;top:52px}
+    .veil{padding:22px}
+    .veil h1{font-size:15px;letter-spacing:.14em}
+    .veil p{font-size:11.5px;line-height:1.85}
+    .veil .go{padding:9px 18px;font-size:10.5px}
+  }
+</style>
+</head>
+<body>
+
+<canvas id="gl"></canvas>
+
+<div class="ui" id="ui">
+  <div class="top">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#ff7fa4" stroke-width="1.2" stroke-linecap="round">
+        <path d="M12 12c-1.6-2.6-1.5-5.4 0-7.2 1.5 1.8 1.6 4.6 0 7.2Z"/>
+        <path d="M12 12c2.6-1.6 5.4-1.5 7.2 0-1.8 1.5-4.6 1.6-7.2 0Z"/>
+        <path d="M12 12c1.6 2.6 1.5 5.4 0 7.2-1.5-1.8-1.6-4.6 0-7.2Z"/>
+        <path d="M12 12c-2.6 1.6-5.4 1.5-7.2 0 1.8-1.5 4.6-1.6 7.2 0Z"/>
+      </svg>
+      <span class="t">指尖花</span>
+      <span class="s">FINGERTIP BLOOM</span>
+    </div>
+    <div class="badge"><span class="dot calm" id="bdot"></span><span id="btxt">正在唤醒</span></div>
+  </div>
+
+  <div class="hud" id="hud">
+    <div class="ico">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 13V6.5a1.5 1.5 0 0 1 3 0V12"/>
+        <path d="M11 11.5V5.8a1.5 1.5 0 0 1 3 0V12"/>
+        <path d="M14 11.5V7a1.5 1.5 0 0 1 3 0v6"/>
+        <path d="M17 10.5a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1.6a6 6 0 0 1-4.6-2.2L5 15.4a1.6 1.6 0 0 1 2.5-2l1.5 1.7"/>
+      </svg>
+    </div>
+    <div>
+      <div class="m" id="hname">等待手势</div>
+      <div class="c" id="hconf">置信度 —</div>
+    </div>
+  </div>
+
+  <div class="cam" id="campanel">
+    <canvas id="camcv" width="484" height="324"></canvas>
+    <div class="lb"><i></i>HAND TRACKING</div>
+    <div class="cnotice" id="camnotice"></div>
+  </div>
+
+  <div class="hint" id="hint">
+    <div class="it act" id="hFist">
+      <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="6.5" y="9" width="11" height="9.5" rx="3.4"/>
+        <path d="M8.4 9V7.2M11.6 9V6.6M14.8 9V7.2"/>
+      </svg>
+      <div><div class="k">握拳</div><div class="d">收拢 · 花苞</div></div>
+    </div>
+    <div class="sep"></div>
+    <div class="it" id="hOpen">
+      <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M7 13V9.2M10 12.4V7.4M13 12.4V6.8M16 12.6V8.2"/>
+        <path d="M7 13l-1.6 2.4a3 3 0 0 0 1 4.2"/>
+        <path d="M16 12.6c.6 1 .6 2.4.6 3.6"/>
+        <path d="M7 13c2.6 2 6.4 2 9 0"/>
+      </svg>
+      <div><div class="k">张开手掌</div><div class="d">控制花瓣 · 自动跟随</div></div>
+    </div>
+    <div class="sep"></div>
+    <div class="it" id="hTurn">
+      <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6.2 9.5A6.5 6.5 0 0 1 18 8.1"/>
+        <path d="m16.2 5.7 2.3 2.2-2.7.9"/>
+        <path d="M17.8 14.5A6.5 6.5 0 0 1 6 15.9"/>
+        <path d="m7.8 18.3-2.3-2.2 2.7-.9"/>
+      </svg>
+      <div><div class="k">左右转手</div><div class="d">旋转花盘 · 远近缩放</div></div>
+    </div>
+  </div>
+
+  <div class="tools">
+    <div class="btn clickable" id="btnMusic">
+      <svg viewBox="0 0 24 24" id="icoMusic"><path d="M9 17.5V6.2l10-2v10.6"/><circle cx="6.4" cy="17.6" r="2.6"/><circle cx="16.4" cy="14.9" r="2.6"/></svg>
+      <span id="mtext">音乐</span>
+      <span class="eq" id="meq" style="display:none"><i></i><i></i><i></i></span>
+    </div>
+    <div class="btn clickable" id="btnHue">
+      <span class="swatch" id="hsw"></span>
+      <span>换色</span>
+    </div>
+    <div class="btn clickable" id="btnShot">
+      <svg viewBox="0 0 24 24"><path d="M4 8.5h3l1.4-2h7.2L17 8.5h3v10H4Z"/><circle cx="12" cy="13" r="3.2"/></svg>
+      保存
+    </div>
+    <div class="btn clickable" id="btnMouse">
+      <svg viewBox="0 0 24 24"><path d="M12 3.5a3 3 0 0 0-3 3v4a3 3 0 0 0 6 0v-4a3 3 0 0 0-3-3Z"/><path d="M12 13.5v7"/></svg>
+      鼠标模式
+    </div>
+    <div class="btn clickable" id="btnFull">
+      <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 15v5h-5M20 9V4h-5M4 15v5h5"/></svg>
+      全屏
+    </div>
+  </div>
+</div>
+
+<!-- 自动播放被浏览器拦下时冒出来的提示条 -->
+<div class="mtip" id="mtip">
+  <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M9 17.5V6.2l10-2v10.6"/><circle cx="6.4" cy="17.6" r="2.6"/><circle cx="16.4" cy="14.9" r="2.6"/>
+  </svg>
+  <span>点一下屏幕，开启<b>音乐</b></span>
+</div>
+
+<!-- ?v= 是缓存版本号：换了音乐文件就把数字加一，否则浏览器/CDN 会继续放旧的 -->
+<audio id="bgm" src="./bloom.mp3?v=2" loop preload="auto"></audio>
+
+<!-- 保存图片预览层（手机上靠长按保存到相册） -->
+<div class="shot" id="shot">
+  <div class="box">
+    <img id="shotimg" alt="指尖花">
+    <div class="tip" id="shottip">
+      <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 11.5V5.6a1.6 1.6 0 0 1 3.2 0V11"/>
+        <path d="M12.2 10.6V4.8a1.6 1.6 0 0 1 3.2 0v6.4"/>
+        <path d="M15.4 11.6V7.4a1.6 1.6 0 0 1 3.2 0V15a6 6 0 0 1-6 6h-1.4a6 6 0 0 1-4.7-2.3L4 15.2a1.6 1.6 0 0 1 2.4-2.1l2 2.1"/>
+      </svg>
+      <span>长按图片 · 选择「<b>保存到相册</b>」</span>
+    </div>
+    <div class="acts">
+      <div class="sbtn ghost" id="shotclose">关闭</div>
+      <div class="sbtn" id="shotdl">下载图片</div>
+    </div>
+  </div>
+</div>
+
+<div class="veil" id="veil">
+  <div class="in">
+    <div class="rt" id="vspin"></div>
+    <h1 id="vtitle">正在唤醒花朵</h1>
+    <p id="vmsg">载入手部识别模型…</p>
+    <div class="acts">
+      <div class="go" id="vgo" style="display:none">进入鼠标模式</div>
+      <div class="go alt" id="vretry" style="display:none">重新尝试摄像头</div>
+      <div class="go alt" id="vskip" style="display:none">跳过，先看效果</div>
+    </div>
+    <div class="lanhint" id="lanhint"></div>
+  </div>
+</div>
+
+<!-- 不能用 display:none 藏：Chrome 对不可见 <video> 有时不产帧，
+     摄像头面板就会出现全黑（本地假摄像头测不出来，真实设备才复现）。
+     用 2px + 透明度 0 隐藏，元素仍在渲染树里，保证持续出帧。 -->
+<video id="cam" playsinline muted autoplay
+  style="position:fixed;left:-4px;top:-4px;width:2px;height:2px;opacity:.001;pointer-events:none"></video>
+
+<script>
+"use strict";
+/* =========================================================
+   指尖花 · Fingertip Bloom
+   粒子花 + MediaPipe 手部骨骼 → 开合手掌控制绽放
+   ========================================================= */
+
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const lerp  = (a, b, t) => a + (b - a) * t;
+const smoothstep = (t) => t * t * (3 - 2 * t);
+const rnd = (a, b) => a + Math.random() * (b - a);
+
+/* ---------------- 1. 粒子建模 ---------------- */
+const L = 1.0;
+
+const P_BUD = [], P_OPEN = [], P_COL = [], P_SIZE = [], P_SEED = [], P_DELAY = [], P_KIND = [];
+let CUR_KIND = 0;   // 0=花瓣 1=花心 2=花粉
+
+function addP(bud, open, col, size, delay) {
+  P_BUD.push(bud[0], bud[1], bud[2]);
+  P_OPEN.push(open[0], open[1], open[2]);
+  P_COL.push(col[0], col[1], col[2]);
+  P_SIZE.push(size);
+  P_SEED.push(Math.random());
+  P_DELAY.push(delay);
+  P_KIND.push(CUR_KIND);
+}
+
+// 花瓣中心线控制点：[水平半径, 高度]
+// 扁平花盘：从花心斜上到"肩部"最高，再缓缓下垂，瓣尖外翻微卷 —— 俯视能看全整朵花
+const PATH = [
+  [0.085,  0.012],
+  [0.300,  0.112],
+  [0.560,  0.152],
+  [0.762,  0.132],
+  [0.880,  0.098],
+  [0.950,  0.062]
+];
+
+function catmullRom(pts, t) {
+  const n = pts.length - 1;
+  const x = clamp(t, 0, 1) * n;
+  const i = Math.min(Math.floor(x), n - 1);
+  const f = x - i;
+  const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(n, i + 2)];
+  const f2 = f * f, f3 = f2 * f;
+  const cr = (a, b, c, d) =>
+    0.5 * ((2 * b) + (-a + c) * f + (2 * a - 5 * b + 4 * c - d) * f2 + (-a + 3 * b - 3 * c + d) * f3);
+  return [cr(p0[0], p1[0], p2[0], p3[0]), cr(p0[1], p1[1], p2[1], p3[1])];
+}
+
+// 绽放态：花瓣中心线（碗状上扬，瓣尖外翻）
+// lift：整层抬高量，内层抬得高 → 花心隆起、花瓣真正叠压而不是同心环
+function petalOpen(t, s, phi, fraySeed, scale, N, tilt, lift) {
+  scale = scale || 1;
+  const PETALN = N || 7;
+  tilt = tilt || 0;
+  const c = catmullRom(PATH, t);
+  const rr = c[0] * scale * (1 + tilt * Math.pow(t, 1.7));
+  const yy = c[1] * scale * (1 + tilt * 0.30 * t);
+
+  // 横向宽度：纺锤形轮廓（瓣根窄 → 中部最宽 → 瓣尖收尖），按当前半径自适应拼满一圈
+  const bell = Math.sin(Math.PI * Math.pow(t, 0.68));
+  const shape = 0.24 + 0.76 * bell;
+  const w = Math.max(0.012, rr * Math.sin(Math.PI / PETALN) * 1.34) * shape;
+
+  // 瓣尖散须：只轻微散开，保持花瓣轮廓清晰
+  const fray = t > 0.76 ? (t - 0.76) / 0.24 : 0;
+  const wob = 1 + fray * (0.10 + fraySeed * 0.22);
+  // 花瓣边缘的波浪起伏，避免死板
+  const wav = 1 + Math.sin(t * 6.2 + fraySeed * 6.283) * 0.08;
+  const sEff = s * wob * wav;
+
+  // 横向方向 e_phi
+  let x = rr * Math.cos(phi) - Math.sin(phi) * sEff * w;
+  let z = rr * Math.sin(phi) + Math.cos(phi) * sEff * w;
+
+  // 花瓣内凹 + 高度起伏（让曲面有弧度而不是平面）
+  const dent = (1 - s * s) * 0.055 * scale * (0.35 + 0.65 * t);
+  x -= Math.cos(phi) * dent;
+  z -= Math.sin(phi) * dent;
+  // 内层整层抬高：越靠瓣尖抬得越多 → 花心隆起，花瓣层层叠压
+  const y = yy + (1 - s * s) * 0.045 * scale * (0.3 + t)
+            + (lift || 0) * (0.20 + 0.80 * t) * (1 - s * s * 0.35);
+
+  return [x, y, z];
+}
+
+// 收拢态：水滴形花苞 —— 底部圆润、顶部收尖，保留纵向丝缕
+function petalBud(t, s, phi, scale) {
+  scale = scale || 1;
+  const v = clamp(t * 1.02, 0, 1);
+  const y = (v - 0.46) * 1.26 * (0.66 + 0.34 * scale);
+  // 上尖下圆：峰值偏下，顶部跨度更长
+  const k = v < 0.42 ? (v - 0.42) / 0.42 : (v - 0.42) / 0.58;
+  const shell = Math.sqrt(Math.max(0, 1 - k * k));
+  // 瓣缘微微外凸，形成包裹的棱；再让丝带点螺旋，像花瓣斜着裹上去
+  const ridge = 1 + 0.13 * Math.pow(Math.abs(s), 7);
+  const rad = 0.268 * shell * scale * ridge;
+  const ang = phi + s * 0.38 + v * 0.42;
+  const thick = 0.76 + 0.24 * Math.abs(s);
+  return [
+    Math.cos(ang) * rad * thick,
+    y,
+    Math.sin(ang) * rad * thick
+  ];
+}
+
+// 花瓣配色：花心暖橙 → 中段玫红 → 瓣尖亮粉；边缘提亮
+function petalColor(t, s, r, phi) {
+  let c;
+  if (t < 0.30) {
+    const k = t / 0.30;
+    c = [lerp(1.00, 1.00, k), lerp(0.80, 0.42, k), lerp(0.52, 0.36, k)];
+  } else if (t < 0.70) {
+    const k = (t - 0.30) / 0.40;
+    c = [lerp(1.00, 0.96, k), lerp(0.42, 0.11, k), lerp(0.34, 0.27, k)];
+  } else {
+    const k = (t - 0.70) / 0.30;
+    c = [lerp(0.96, 1.00, k), lerp(0.11, 0.44, k), lerp(0.27, 0.58, k)];
+  }
+  // 边缘轻微提亮（花瓣轮廓光，不要抢主体）
+  const e = Math.pow(Math.abs(s), 2.6);
+  c = [lerp(c[0], 1.00, e * 0.40), lerp(c[1], 0.52, e * 0.36), lerp(c[2], 0.62, e * 0.36)];
+  // 碗底（t≈0.3）加亮
+  const bowl = Math.exp(-Math.pow((t - 0.38) / 0.12, 2)) * Math.pow(Math.abs(s), 4.0) * 0.75;
+  c = [c[0] + bowl * 0.34, c[1] + bowl * 0.13, c[2] + bowl * 0.16];
+  // 瓣尖亮边
+  const tip = Math.pow(clamp((t - 0.80) / 0.20, 0, 1), 1.6) * 0.80;
+  c = [c[0] + tip * 0.55, c[1] + tip * 0.22, c[2] + tip * 0.30];
+  // 花脉：极淡的放射细纹，只在瓣尖附近隐约可见
+  const vein = Math.pow(Math.abs(Math.sin(s * 12.0 + t * 1.1)), 12.0) * 0.12 * t;
+  c = [c[0] + vein * 0.34, c[1] + vein * 0.15, c[2] + vein * 0.20];
+  // 基部压暗，让碗底不糊成一团
+  const baseDim = 0.50 + 0.50 * smoothstep(clamp(t / 0.38, 0, 1));
+  // 假光照：左上方来光，朝向光源的花瓣更亮 → 整朵花有立体感
+  const lit = 0.85 + 0.15 * Math.cos((phi || 0) - 2.35);
+  // 随机明暗
+  const f = (0.72 + r * 0.56) * 0.90 * baseDim * lit;
+  return [c[0] * f, c[1] * f, c[2] * f];
+}
+
+// —— 花瓣粒子（外层 + 中层 + 内层，逐层错开半瓣）
+// —— 花瓣粒子（外层 + 中层 + 内层，逐层错开、逐层抬高）
+const LAYERS = [
+  { count: 9, scale: 1.00, phase: 0.00, bright: 1.18, strands: 58, per: 122, lift: 0.000 },
+  { count: 9, scale: 0.72, phase: Math.PI / 9, bright: 1.42, strands: 42, per: 96, lift: 0.055 },
+  { count: 7, scale: 0.48, phase: Math.PI / 14, bright: 1.70, strands: 26, per: 70, lift: 0.105 }
+];
+
+for (const layer of LAYERS) {
+  for (let p = 0; p < layer.count; p++) {
+    const phi = (p / layer.count) * Math.PI * 2 + layer.phase;
+    const pScale = layer.scale * rnd(0.90, 1.11);
+    const pTilt = rnd(-0.12, 0.17);
+    for (let st = 0; st < layer.strands; st++) {
+      // 丝的位置：边缘更密
+      const u = (st / (layer.strands - 1)) * 2 - 1;
+      const s0 = Math.sign(u) * Math.pow(Math.abs(u), 0.82) + rnd(-0.03, 0.03);
+      const fraySeed = Math.random();
+      const sJit = rnd(-0.014, 0.014);
+      const n = layer.per;
+      for (let i = 0; i < n; i++) {
+        const t = 0.10 + Math.pow(i / (n - 1), 0.72) * 0.90 + rnd(-0.007, 0.007);
+        const tt = clamp(t, 0, 1);
+        const sWave = Math.sin(tt * 3.4 + fraySeed * 6.283) * 0.07;
+        const s = clamp(s0 + sJit + sWave, -1.06, 1.06);
+        const open = petalOpen(tt, s, phi, fraySeed, pScale, layer.count, pTilt, layer.lift);
+        const bud = petalBud(tt, s, phi, pScale);
+        const col = petalColor(tt, s, Math.random(), phi);
+        // 内部丝略压暗、边缘丝提亮 → 花瓣有"面"也有清晰的轮廓光
+        const edgeF = Math.pow(Math.abs(s), 2.2);
+        const strandF = (0.88 + 0.62 * edgeF) * layer.bright * 0.85;
+        // 边缘粒子略大 → 轮廓清楚又不毛躁
+        const size = rnd(1.10, 1.95) * (1.0 + Math.pow(Math.abs(s), 3.0) * 0.55);
+        const delay = 0.10 * (1 - tt) + rnd(0, 0.05);
+        addP(bud, open, [col[0] * strandF, col[1] * strandF, col[2] * strandF], size, delay);
+      }
+    }
+    // 游离颗粒，增加颗粒质感
+    for (let i = 0; i < 52; i++) {
+      const t = Math.pow(Math.random(), 0.85);
+      const s = rnd(-1, 1) * (0.55 + 0.45 * Math.random());
+      const open = petalOpen(t, s, phi + rnd(-0.05, 0.05), Math.random(), pScale, layer.count, pTilt, layer.lift);
+      open[0] += rnd(-0.012, 0.012); open[1] += rnd(-0.012, 0.012); open[2] += rnd(-0.012, 0.012);
+      const bud = petalBud(t, s, phi, pScale);
+      addP(bud, open, petalColor(t, s, Math.random() * 1.2, phi), rnd(0.9, 1.8), rnd(0, 0.16));
+    }
+  }
+}
+
+CUR_KIND = 1;
+// —— 花心暖核（大光斑叠加，形成柔和核心而不是死白）
+for (let i = 0; i < 560; i++) {
+  const u = Math.random() * 2 - 1;
+  const th = Math.random() * Math.PI * 2;
+  const rr = Math.pow(Math.random(), 0.55) * 0.195;
+  const sp = Math.sqrt(Math.max(0, 1 - u * u));
+  const x = rr * sp * Math.cos(th);
+  const y = rr * u * 0.80 + 0.075;
+  const z = rr * sp * Math.sin(th);
+  // 越靠中心越白亮
+  const k = 1 - Math.min(1, rr / 0.195);
+  const col = [
+    lerp(1.0, 1.0, k),
+    lerp(0.42, 0.88, k),
+    lerp(0.14, 0.58, k)
+  ];
+  const f = (0.70 + Math.random() * 0.44) * 0.19;
+  addP(
+    [x * 0.50, y * 0.46 - 0.02, z * 0.50],
+    [x, y, z],
+    [col[0] * f, col[1] * f, col[2] * f],
+    rnd(4.5, 10.0),
+    rnd(0, 0.10)
+  );
+}
+
+CUR_KIND = 2;
+// —— 飘散花粉
+for (let i = 0; i < 1500; i++) {
+  const th = Math.random() * Math.PI * 2;
+  const ph = Math.acos(Math.random() * 2 - 1);
+  const rr = 0.42 + Math.pow(Math.random(), 0.55) * 1.25;
+  const ox = Math.sin(ph) * Math.cos(th) * rr;
+  const oy = Math.cos(ph) * rr * 0.85 + 0.05;
+  const oz = Math.sin(ph) * Math.sin(th) * rr;
+  const col = [1.0, lerp(0.25, 0.62, Math.random()), lerp(0.40, 0.78, Math.random())];
+  const f = 0.06 + Math.random() * 0.16;
+  addP(
+    [ox * 0.24, oy * 0.34 - 0.02, oz * 0.24],
+    [ox, oy, oz],
+    [col[0] * f, col[1] * f, col[2] * f],
+    rnd(0.6, 1.5),
+    rnd(0.05, 0.42)
+  );
+}
+
+CUR_KIND = 3;
+// —— 落瓣：从最外层花瓣上脱离、飘落、淡出（真正的下落由顶点着色器驱动）
+for (let i = 0; i < 520; i++) {
+  const phi = Math.random() * Math.PI * 2;
+  const t = rnd(0.50, 0.96);
+  const s = rnd(-0.82, 0.82);
+  const open = petalOpen(t, s, phi, Math.random(), 1.0, 9, 0, 0);
+  const bud = petalBud(t, s, phi, 1.0);
+  const col = petalColor(t, s, Math.random(), phi);
+  const f = 1.25;
+  addP(bud, open, [col[0] * f, col[1] * f, col[2] * f], rnd(1.0, 1.9), rnd(0, 0.12));
+}
+
+/* ---------------- 2. WebGL ---------------- */
+const canvas = document.getElementById('gl');
+const gl = canvas.getContext('webgl', {
+  antialias: true, alpha: false, premultipliedAlpha: false,
+  preserveDrawingBuffer: true,   // 保存图片要用
+  powerPreference: 'high-performance'
+});
+
+const BG_VS = `
+attribute vec2 aPos;
+varying vec2 vUv;
+void main(){ vUv = aPos * 0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+const BG_FS = `
+precision highp float;
+varying vec2 vUv;
+uniform vec2 uRes;
+uniform float uTime;
+uniform float uBloom;
+uniform float uHue;
+
+float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+float hash2(vec2 p){ return fract(sin(dot(p, vec2(39.346, 11.135))) * 24634.6345); }
+
+vec3 rgb2hsl(vec3 c){
+  float mx = max(max(c.r, c.g), c.b);
+  float mn = min(min(c.r, c.g), c.b);
+  float l = (mx + mn) * 0.5;
+  float d = mx - mn;
+  if (d < 0.0001) return vec3(0.0, 0.0, l);
+  float s = l > 0.5 ? d / max(2.0 - mx - mn, 0.0001) : d / max(mx + mn, 0.0001);
+  float h;
+  if (mx == c.r)      h = (c.g - c.b) / d + (c.g < c.b ? 6.0 : 0.0);
+  else if (mx == c.g) h = (c.b - c.r) / d + 2.0;
+  else                h = (c.r - c.g) / d + 4.0;
+  return vec3(h / 6.0, s, l);
+}
+float h2c(float p, float q, float t){
+  t = fract(t);
+  if (t < 0.166667) return p + (q - p) * 6.0 * t;
+  if (t < 0.5)      return q;
+  if (t < 0.666667) return p + (q - p) * (0.666667 - t) * 6.0;
+  return p;
+}
+vec3 hsl2rgb(vec3 hsl){
+  if (hsl.y < 0.0001) return vec3(hsl.z);
+  float q = hsl.z < 0.5 ? hsl.z * (1.0 + hsl.y) : hsl.z + hsl.y - hsl.z * hsl.y;
+  float p = 2.0 * hsl.z - q;
+  return vec3(h2c(p, q, hsl.x + 0.333333), h2c(p, q, hsl.x), h2c(p, q, hsl.x - 0.333333));
+}
+vec3 hueShift(vec3 c, float a){
+  float lum = max(max(c.r, c.g), c.b);
+  if (lum < 0.0005 || abs(a) < 0.0005) return c;
+  vec3 h = rgb2hsl(c / lum);
+  h.x = fract(h.x + a);
+  return hsl2rgb(h) * lum;
+}
+
+void main(){
+  vec2 p = (vUv - 0.5) * vec2(uRes.x / uRes.y, 1.0);
+  float d = length(p * vec2(0.88, 1.0));
+
+  vec3 inner = vec3(0.015, 0.005, 0.010);
+  vec3 outer = vec3(0.002, 0.001, 0.003);
+  vec3 col = mix(inner, outer, smoothstep(0.02, 0.90, d));
+
+  // 花心后方的暖光晕，随绽放增强；色相跟随花朵
+  float halo = exp(-d * d * 5.2);
+  vec3 haloCol = hueShift(vec3(0.082, 0.028, 0.046), uHue);
+  col += haloCol * halo * (0.55 + 0.80 * uBloom) * (0.82 + 0.18 * sin(uTime * 0.42));
+
+  // 地平雾带
+  col += hueShift(vec3(0.018, 0.006, 0.013), uHue * 0.7) * exp(-pow((p.y + 0.06) * 2.4, 2.0));
+
+  // 星尘：稀疏亮点，缓慢明灭
+  vec2 gp = vUv * uRes / 3.0;
+  vec2 gi = floor(gp);
+  float h = hash(gi);
+  if (h > 0.985) {
+    vec2 off = vec2(hash2(gi), hash2(gi + 7.1)) - 0.5;
+    float dd = length(fract(gp) - 0.5 - off * 0.55);
+    float tw = 0.45 + 0.55 * sin(uTime * (0.7 + h * 2.6) + h * 62.0);
+    float fade = 1.0 - smoothstep(0.20, 0.88, d);
+    col += hueShift(vec3(1.0, 0.58, 0.70), uHue) * smoothstep(0.17, 0.0, dd) * tw * fade * 0.34;
+  }
+
+  // 颗粒
+  float n = hash(vUv * uRes * 0.7 + fract(uTime) * 13.0);
+  col += (n - 0.5) * 0.010;
+
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+const PT_VS = `
+precision highp float;
+attribute vec3 aBud;
+attribute vec3 aOpen;
+attribute vec3 aCol;
+attribute float aSize;
+attribute float aSeed;
+attribute float aDelay;
+attribute float aKind;
+
+uniform float uBloom;
+uniform float uPulse;
+uniform float uHue;
+uniform float uBeat;
+uniform float uBurst;
+uniform float uTime;
+uniform vec2  uRes;
+uniform float uPx;
+uniform float uDpr;
+uniform float uPxK;
+uniform float uYOff;
+uniform float uIntro;
+uniform vec2  uPar;
+uniform float uSpin;
+uniform float uScale;
+
+varying vec3 vCol;
+varying float vA;
+
+/* ---- HSL 色相旋转（先归一化色度，避免暗部变灰） ---- */
+vec3 rgb2hsl(vec3 c){
+  float mx = max(max(c.r, c.g), c.b);
+  float mn = min(min(c.r, c.g), c.b);
+  float l = (mx + mn) * 0.5;
+  float d = mx - mn;
+  if (d < 0.0001) return vec3(0.0, 0.0, l);
+  float s = l > 0.5 ? d / max(2.0 - mx - mn, 0.0001) : d / max(mx + mn, 0.0001);
+  float h;
+  if (mx == c.r)      h = (c.g - c.b) / d + (c.g < c.b ? 6.0 : 0.0);
+  else if (mx == c.g) h = (c.b - c.r) / d + 2.0;
+  else                h = (c.r - c.g) / d + 4.0;
+  return vec3(h / 6.0, s, l);
+}
+
+float h2c(float p, float q, float t){
+  t = fract(t);
+  if (t < 0.166667) return p + (q - p) * 6.0 * t;
+  if (t < 0.5)      return q;
+  if (t < 0.666667) return p + (q - p) * (0.666667 - t) * 6.0;
+  return p;
+}
+
+vec3 hsl2rgb(vec3 hsl){
+  if (hsl.y < 0.0001) return vec3(hsl.z);
+  float q = hsl.z < 0.5 ? hsl.z * (1.0 + hsl.y) : hsl.z + hsl.y - hsl.z * hsl.y;
+  float p = 2.0 * hsl.z - q;
+  return vec3(h2c(p, q, hsl.x + 0.333333), h2c(p, q, hsl.x), h2c(p, q, hsl.x - 0.333333));
+}
+
+vec3 hueShift(vec3 c, float a){
+  float lum = max(max(c.r, c.g), c.b);
+  if (lum < 0.0005 || abs(a) < 0.0005) return c;
+  vec3 h = rgb2hsl(c / lum);           // 归一化色度 → 亮度和色相解耦
+  h.x = fract(h.x + a);
+  h.y = min(1.0, h.y * 1.30);          // 补一点饱和度，换色后不发灰
+  return hsl2rgb(h) * lum;
+}
+
+void main(){
+  float b = clamp((uBloom - aDelay) / max(1.0 - aDelay, 0.0001), 0.0, 1.0);
+  b = b * b * (3.0 - 2.0 * b);
+
+  vec3 p = mix(aBud, aOpen, b);
+  // 绽放后整体下移，让花朵保持在画面中心
+  p.y -= uYOff * uBloom;
+
+  // 入场：从中心一点萌发，逐粒长出
+  float it = clamp((uIntro - aSeed * 0.34) / 0.66, 0.0, 1.0);
+  it = 1.0 - pow(1.0 - it, 3.0);
+  p *= it;
+
+  // 呼吸
+  float br = 1.0 + 0.016 * sin(uTime * 0.80 + aSeed * 0.4);
+  p *= br;
+
+  // 微风：整朵花轻轻摇曳，瓣尖摆幅更大
+  float lift = clamp(p.y + 0.35, 0.0, 1.6);
+  p.x += (sin(uTime * 0.44) * 0.020 + sin(uTime * 0.29 + 1.7) * 0.013) * lift;
+  p.z += (cos(uTime * 0.37 + 0.8) * 0.017 + sin(uTime * 0.23) * 0.010) * lift;
+  p.y += sin(uTime * 0.31 + 2.4) * 0.010 * lift;
+
+  // 微粒浮动
+  float ph = aSeed * 6.2831;
+  float amp = 0.005 + 0.011 * b;
+  p.x += sin(uTime * 1.25 + ph) * amp;
+  p.y += cos(uTime * 1.05 + ph * 1.7) * amp;
+  p.z += sin(uTime * 0.95 + ph * 2.3) * amp;
+
+  // 花心：缓慢搏动 + 跟着鼓点跳
+  if (aKind > 0.5 && aKind < 1.5) {
+    p *= 1.0 + 0.055 * sin(uTime * 1.55 + aSeed * 6.2831) + uBeat * 0.085;
+  }
+
+  // 花粉：向上飘散，带缓慢横向游移；绽放瞬间向外迸发
+  if (aKind > 1.5 && aKind < 2.5) {
+    float t2 = uTime * 0.42 + aSeed * 21.0;
+    p.x += sin(t2) * 0.06;
+    p.y += cos(t2 * 0.83) * 0.085 + sin(uTime * 0.23 + aSeed * 6.2831) * 0.055;
+    p.z += sin(t2 * 0.67) * 0.06;
+    p *= 1.0 + uBurst * (0.30 + aSeed * 0.45);
+  }
+
+  // 落瓣：从花瓣上慢慢脱离、飘落、淡出
+  float fallFade = 1.0;
+  if (aKind > 2.5) {
+    float f = fract(uTime * 0.052 + aSeed * 3.71);
+    f = f * f;
+    p.y -= f * 1.55;
+    p.x += sin(uTime * 0.78 + aSeed * 21.0) * f * 0.26;
+    p.z += cos(uTime * 0.61 + aSeed * 17.0) * f * 0.20;
+    fallFade = (1.0 - f) * smoothstep(0.42, 0.92, uBloom);
+  }
+
+  // 音乐：整朵花随低频轻轻胀缩
+  p *= 1.0 + uBeat * 0.028;
+
+  // 开合变化时的脉冲
+  p *= 1.0 + uPulse * 0.06;
+
+  // 手掌滚转 → 整朵花旋转；手掌远近 → 轻微缩放
+  float spinC = cos(uSpin);
+  float spinS = sin(uSpin);
+  p.xy = vec2(p.x * spinC - p.y * spinS, p.x * spinS + p.y * spinC);
+  p *= uScale;
+
+  // 俯视花盘：约 38° 俯角，花盘正对屏幕，层次清楚不散
+  float ang = -0.66;
+  float ca = cos(ang), sa = sin(ang);
+  vec3 q = vec3(p.x, p.y * ca - p.z * sa, p.y * sa + p.z * ca);
+
+  // 视差：近处跟随更多，制造空间纵深
+  float dep = 0.5 + clamp(q.z, -1.2, 1.2) * 0.42;
+  q.x += uPar.x * (0.03 + dep * 0.075);
+  q.y += uPar.y * (0.03 + dep * 0.075);
+
+  float persp = 1.0 / (1.0 + q.z * 0.28);
+  vec2 ndc = vec2(q.x * persp * uPx, q.y * persp * uPx) / (0.5 * uRes);
+
+  gl_Position = vec4(ndc, 0.0, 1.0);
+
+  // 景深：远处更小更淡，近处更大更实
+  float dof = smoothstep(-1.25, 0.85, q.z);
+  gl_PointSize = aSize * uDpr * uPxK * persp * (0.62 + 0.62 * dof);
+
+  // 花心保持暖色（只轻微跟随），花瓣与花粉完整换色
+  float hueAmt = (aKind > 0.5 && aKind < 1.5) ? uHue * 0.22 : uHue;
+  vCol = hueShift(aCol, hueAmt) * (0.56 + 0.44 * uBloom) * (1.0 + uBeat * 0.20 + uBurst * 0.55);
+  vA = clamp(0.30 + 0.78 * dof, 0.10, 1.0) * smoothstep(0.0, 0.55, it) * fallFade;
+}`;
+
+const PT_FS = `
+precision highp float;
+varying vec3 vCol;
+varying float vA;
+void main(){
+  vec2 d = gl_PointCoord - 0.5;
+  float r = length(d) * 2.0;
+  if (r > 1.0) discard;
+  float a = 1.0 - r;
+  // 核心亮、边缘柔的软光斑
+  float core = a * a;
+  float soft = core * core * (0.62 + 0.38 * core);
+  gl_FragColor = vec4(vCol * (soft + core * 0.55) * vA, 1.0);
+}`;
+
+/* ---------- 后处理：亮部提取 / 高斯模糊 / 合成 ---------- */
+const POST_VS = `
+attribute vec2 aPos;
+varying vec2 vUv;
+void main(){ vUv = aPos * 0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+const BRIGHT_FS = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uTex;
+uniform vec2 uTexel;
+uniform float uThreshold;
+void main(){
+  vec3 c  = texture2D(uTex, vUv + uTexel * vec2(-0.5, -0.5)).rgb;
+  c += texture2D(uTex, vUv + uTexel * vec2( 0.5, -0.5)).rgb;
+  c += texture2D(uTex, vUv + uTexel * vec2(-0.5,  0.5)).rgb;
+  c += texture2D(uTex, vUv + uTexel * vec2( 0.5,  0.5)).rgb;
+  c *= 0.25;
+  float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  float k = smoothstep(uThreshold, uThreshold + 0.42, lum);
+  gl_FragColor = vec4(c * k, 1.0);
+}`;
+
+const BLUR_FS = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uTex;
+uniform vec2 uDir;
+void main(){
+  vec3 s = texture2D(uTex, vUv).rgb * 0.2270270;
+  s += (texture2D(uTex, vUv + uDir * 1.0).rgb + texture2D(uTex, vUv - uDir * 1.0).rgb) * 0.1945946;
+  s += (texture2D(uTex, vUv + uDir * 2.0).rgb + texture2D(uTex, vUv - uDir * 2.0).rgb) * 0.1216216;
+  s += (texture2D(uTex, vUv + uDir * 3.0).rgb + texture2D(uTex, vUv - uDir * 3.0).rgb) * 0.0540541;
+  s += (texture2D(uTex, vUv + uDir * 4.0).rgb + texture2D(uTex, vUv - uDir * 4.0).rgb) * 0.0162162;
+  gl_FragColor = vec4(s, 1.0);
+}`;
+
+const COMP_FS = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uScene;
+uniform sampler2D uGlow;
+uniform vec2 uRes;
+uniform float uTime;
+uniform float uGlowAmt;
+uniform float uIntro;
+uniform float uBeat;
+uniform float uBurst;
+
+vec3 aces(vec3 x){
+  return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+}
+float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+
+void main(){
+  vec2 uv = vUv;
+  vec2 cc = uv - 0.5;
+  float r2 = dot(cc, cc);
+
+  // 镜头色差：中心几乎无，边缘轻微分离
+  float ca = 0.0012 + r2 * 0.0055;
+
+  vec3 col;
+  col.r = texture2D(uScene, uv + cc * ca).r;
+  col.g = texture2D(uScene, uv).g;
+  col.b = texture2D(uScene, uv - cc * ca).b;
+
+  vec3 glow;
+  glow.r = texture2D(uGlow, uv + cc * ca * 2.0).r;
+  glow.g = texture2D(uGlow, uv).g;
+  glow.b = texture2D(uGlow, uv - cc * ca * 2.0).b;
+
+  col += glow * uGlowAmt * (1.0 + uBeat * 0.50 + uBurst * 1.10);
+
+  // 暗角
+  float vig = smoothstep(1.02, 0.22, length(cc * vec2(1.0, 0.94)) * 1.30);
+  col *= 0.52 + 0.48 * vig;
+
+  // 色调映射，保留高光层次不糊成白块
+  col = aces(col * 3.00);
+
+  // 绽放瞬间：从花心向外扩散的一圈光环（只叠加，不动整体曝光）
+  if (uBurst > 0.002) {
+    float rad = length(cc * vec2(1.0, 1.06));
+    float ring = exp(-pow((rad - (1.0 - uBurst) * 0.62) / 0.072, 2.0));
+    col += vec3(1.0, 0.70, 0.80) * ring * uBurst * 0.50;
+  }
+
+  // 胶片颗粒
+  float n = hash(uv * uRes + fract(uTime * 0.63) * 97.0);
+  col += (n - 0.5) * 0.018;
+
+  // 入场淡入
+  col *= smoothstep(0.0, 0.30, uIntro);
+
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+function compile(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    console.error(gl.getShaderInfoLog(s), src);
+  }
+  return s;
+}
+function program(vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(p));
+  return p;
+}
+
+const bgProg = program(BG_VS, BG_FS);
+const ptProg = program(PT_VS, PT_FS);
+const brightProg = program(POST_VS, BRIGHT_FS);
+const blurProg = program(POST_VS, BLUR_FS);
+const compProg = program(POST_VS, COMP_FS);
+
+const postLoc = {
+  bright: {
+    tex: gl.getUniformLocation(brightProg, 'uTex'),
+    texel: gl.getUniformLocation(brightProg, 'uTexel'),
+    thr: gl.getUniformLocation(brightProg, 'uThreshold'),
+    pos: gl.getAttribLocation(brightProg, 'aPos')
+  },
+  blur: {
+    tex: gl.getUniformLocation(blurProg, 'uTex'),
+    dir: gl.getUniformLocation(blurProg, 'uDir'),
+    pos: gl.getAttribLocation(blurProg, 'aPos')
+  },
+  comp: {
+    scene: gl.getUniformLocation(compProg, 'uScene'),
+    glow: gl.getUniformLocation(compProg, 'uGlow'),
+    res: gl.getUniformLocation(compProg, 'uRes'),
+    time: gl.getUniformLocation(compProg, 'uTime'),
+    amt: gl.getUniformLocation(compProg, 'uGlowAmt'),
+    intro: gl.getUniformLocation(compProg, 'uIntro'),
+    beat: gl.getUniformLocation(compProg, 'uBeat'),
+    burst: gl.getUniformLocation(compProg, 'uBurst'),
+    pos: gl.getAttribLocation(compProg, 'aPos')
+  }
+};
+
+/* ---------- 离屏帧缓冲 ---------- */
+function createFBO(w, h) {
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const fb = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return { tex, fb, w, h };
+}
+function freeFBO(f) {
+  if (!f) return;
+  gl.deleteFramebuffer(f.fb);
+  gl.deleteTexture(f.tex);
+}
+
+let fboScene = null, fboGlowA = null, fboGlowB = null;
+function rebuildFBO() {
+  freeFBO(fboScene); freeFBO(fboGlowA); freeFBO(fboGlowB);
+  fboScene = createFBO(W, H);
+  const gw = Math.max(4, Math.floor(W / 4));
+  const gh = Math.max(4, Math.floor(H / 4));
+  fboGlowA = createFBO(gw, gh);
+  fboGlowB = createFBO(gw, gh);
+}
+
+function drawQuad(posLoc) {
+  gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+  gl.enableVertexAttribArray(posLoc);
+  gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+// 背景 quad
+const quad = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+const bgPosLoc = gl.getAttribLocation(bgProg, 'aPos');
+const bgResLoc = gl.getUniformLocation(bgProg, 'uRes');
+const bgTimeLoc = gl.getUniformLocation(bgProg, 'uTime');
+const bgBloomLoc = gl.getUniformLocation(bgProg, 'uBloom');
+const bgHueLoc = gl.getUniformLocation(bgProg, 'uHue');
+
+// 粒子 buffer
+function makeBuf(data, loc) {
+  const b = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, b);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+  return b;
+}
+// 打乱粒子顺序：低帧时只画前 N% 就是均匀抽样，不会缺掉整片花瓣
+(function shuffleParticles() {
+  const n = P_SIZE.length;
+  const idx = new Uint32Array(n);
+  for (let i = 0; i < n; i++) idx[i] = i;
+  for (let i = n - 1; i > 0; i--) {
+    const j = (Math.random() * (i + 1)) | 0;
+    const tmp = idx[i]; idx[i] = idx[j]; idx[j] = tmp;
+  }
+  const reorder = (arr, w) => {
+    const copy = arr.slice();
+    for (let i = 0; i < n; i++) {
+      const s = idx[i] * w;
+      for (let k = 0; k < w; k++) arr[i * w + k] = copy[s + k];
+    }
+  };
+  reorder(P_BUD, 3); reorder(P_OPEN, 3); reorder(P_COL, 3);
+  reorder(P_SIZE, 1); reorder(P_SEED, 1); reorder(P_DELAY, 1); reorder(P_KIND, 1);
+})();
+
+const COUNT = P_SIZE.length;
+let drawCount = COUNT;   // 低帧时可抽稀
+const bufBud = makeBuf(P_BUD, 0);
+const bufOpen = makeBuf(P_OPEN, 0);
+const bufCol = makeBuf(P_COL, 0);
+const bufSize = makeBuf(P_SIZE, 0);
+const bufSeed = makeBuf(P_SEED, 0);
+const bufDelay = makeBuf(P_DELAY, 0);
+const bufKind = makeBuf(P_KIND, 0);
+
+const loc = {
+  bud: gl.getAttribLocation(ptProg, 'aBud'),
+  open: gl.getAttribLocation(ptProg, 'aOpen'),
+  col: gl.getAttribLocation(ptProg, 'aCol'),
+  size: gl.getAttribLocation(ptProg, 'aSize'),
+  seed: gl.getAttribLocation(ptProg, 'aSeed'),
+  delay: gl.getAttribLocation(ptProg, 'aDelay'),
+  kind: gl.getAttribLocation(ptProg, 'aKind'),
+  bloom: gl.getUniformLocation(ptProg, 'uBloom'),
+  pulse: gl.getUniformLocation(ptProg, 'uPulse'),
+  hue: gl.getUniformLocation(ptProg, 'uHue'),
+  beat: gl.getUniformLocation(ptProg, 'uBeat'),
+  burst: gl.getUniformLocation(ptProg, 'uBurst'),
+  time: gl.getUniformLocation(ptProg, 'uTime'),
+  res: gl.getUniformLocation(ptProg, 'uRes'),
+  px: gl.getUniformLocation(ptProg, 'uPx'),
+  yoff: gl.getUniformLocation(ptProg, 'uYOff'),
+  intro: gl.getUniformLocation(ptProg, 'uIntro'),
+  par: gl.getUniformLocation(ptProg, 'uPar'),
+  spin: gl.getUniformLocation(ptProg, 'uSpin'),
+  scale: gl.getUniformLocation(ptProg, 'uScale'),
+  dpr: gl.getUniformLocation(ptProg, 'uDpr'),
+  pxk: gl.getUniformLocation(ptProg, 'uPxK')
+};
+
+let W = 1, H = 1, DPR = 1;
+let DPRCAP = 2;   // 自适应画质：低帧时降到 1
+
+// 截图专用的临时提清晰度：降级状态下保存，图会跟着变糊，
+// 所以点保存时先把分辨率和粒子数临时拉满，截完再还原。
+let shotBoostDpr = false;
+let shotBoostDraw = 0;
+let qualityLock = false;   // 截图期间锁住自适应降级，否则刚提上来又被降回去
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, DPRCAP);
+  W = Math.floor(window.innerWidth * DPR);
+  H = Math.floor(window.innerHeight * DPR);
+  canvas.width = W; canvas.height = H;
+  canvas.style.width = window.innerWidth + 'px';
+  canvas.style.height = window.innerHeight + 'px';
+  rebuildFBO();
+}
+resize();
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 220));
+
+/* ---------------- 3. 状态与交互 ---------------- */
+// 色相环取值（1 = 360°）。以粉色为 0，只走 蓝紫 → 紫 → 粉 → 蜜桃 的区间，避开绿色
+const HUE_SEQ = [0, -0.05, -0.14, -0.24, -0.14, 0.06, 0.11, 0.04];
+
+const state = {
+  bloom: 0.06,        // 当前绽放度 0..1
+  target: 0.06,       // 目标绽放度
+  mouseMode: false,
+  camFailed: false,
+  handActive: false,
+  handConf: 0,
+  gesture: 0,         // 0 收拢 / 1 半开 / 2 绽放
+  pointer: 0.12,      // 鼠标模式指针位置 0..1
+  lastHandAt: 0,
+  ready: false,
+  intro: 0,                             // 入场生长进度
+  pulse: 0, prevBloom: 0.06,             // 开合变化脉冲
+  hue: 0, hueTarget: 0, hueIdx: 0, hueTimer: 0,   // 自动换色
+  beat: 0,                                        // 音乐低频能量（平滑后）
+  burst: 0, prevBloomForBurst: 0.06,              // 绽放瞬间的光爆
+  mouseX: window.innerWidth * 0.5, mouseY: window.innerHeight * 0.5,
+  handX: 0.5, handY: 0.5,
+  par: { x: 0, y: 0 },                  // 平滑后的视差
+  parTarget: { x: 0, y: 0 },
+  spin: 0, spinTarget: 0,               // 手掌滚转 → 花朵旋转
+  scale: 1, scaleTarget: 1,             // 手掌远近 → 花朵缩放
+  pinchArmed: true, lastPinchAt: 0,
+  gestureNote: '', gestureNoteUntil: 0
+};
+
+const bdot = document.getElementById('bdot');
+const btxt = document.getElementById('btxt');
+const hname = document.getElementById('hname');
+const hconf = document.getElementById('hconf');
+const hud = document.getElementById('hud');
+const campanel = document.getElementById('campanel');
+const hFist = document.getElementById('hFist');
+const hOpen = document.getElementById('hOpen');
+const hTurn = document.getElementById('hTurn');
+
+// 触屏设备（手机 / 平板）：文案、保存方式、全屏按钮都要按这个分支
+const IS_TOUCH = (window.matchMedia && matchMedia('(pointer:coarse)').matches)
+  || (navigator.maxTouchPoints > 0 && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent));
+// iOS / iPadOS（iPadOS 13+ 的 UA 伪装成 Mac，靠触点数区分）
+const IS_IOS = /iPhone|iPad|iPod/i.test(navigator.userAgent)
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+// 手机性能预算：音乐连续性比满粒子更重要。
+// 原先 116k 粒子 × DPR2 的后处理会和 CPU 手势识别抢主线程 / GPU，
+// 音乐解码就会出现「一卡一卡」。先把移动端固定在 1x + 70% 粒子，
+// 截图时仍会临时拉满，所以保存的图不会变糊。
+const MOBILE_DPRCAP = 1;
+const MOBILE_DRAW_RATIO = 0.70;
+if (IS_TOUCH) {
+  DPRCAP = MOBILE_DPRCAP;
+  drawCount = Math.floor(COUNT * MOBILE_DRAW_RATIO);
+  resize();
+}
+const ui = document.getElementById('ui');
+
+const GESTURE_NAME = ['指尖收拢', '半开 · 舒展', '手掌张开'];
+
+function updateUI() {
+  const g = state.bloom;
+  const gi = g < 0.28 ? 0 : g < 0.66 ? 1 : 2;
+  state.gesture = gi;
+
+  btxt.textContent = gi === 0 ? '指尖收拢 · 花苞'
+    : gi === 1 ? '半开 · 舒展中'
+    : (state.mouseMode && IS_TOUCH ? '手指上滑 · 绽放' : '手掌张开 · 绽放');
+  bdot.className = 'dot' + (gi === 0 ? ' calm' : '');
+
+  if (state.mouseMode) {
+    // 手机上没有"指针"，说手指更自然
+    hname.textContent = IS_TOUCH
+      ? (gi === 0 ? '手指收拢' : gi === 1 ? '半开 · 舒展' : '完全绽放')
+      : (gi === 0 ? '指针收拢' : gi === 1 ? '指针半开' : '指针舒展');
+    const rot = Math.round(state.spin * 180 / Math.PI);
+    hconf.textContent = '开合 ' + Math.round(g * 100) + '% · 旋转 '
+      + (rot > 0 ? '+' : '') + rot + '°';
+  } else if (state.handActive) {
+    hname.textContent = GESTURE_NAME[gi];
+    if (performance.now() < state.gestureNoteUntil) {
+      hconf.textContent = state.gestureNote;
+    } else {
+      const rot = Math.round(state.spin * 180 / Math.PI);
+      hconf.textContent = '开合 ' + Math.round(g * 100) + '% · 旋转 '
+        + (rot > 0 ? '+' : '') + rot + '° · 缩放 '
+        + Math.round(state.scale * 100) + '%';
+    }
+  } else {
+    hname.textContent = '等待手势';
+    hconf.textContent = '把手放进镜头';
+  }
+
+  hFist.classList.toggle('act', gi === 0);
+  hOpen.classList.toggle('act', gi === 2);
+  hTurn.classList.toggle('act',
+    Math.abs(state.spin) > 0.08 || performance.now() < state.gestureNoteUntil);
+}
+
+/* ---------- 鼠标 / 触摸模式 ---------- */
+function pointerToBloom(y) {
+  // 上方 = 绽放，下方 = 收拢
+  const t = 1 - clamp(y / window.innerHeight, 0, 1);
+  return clamp((t - 0.12) / 0.76, 0, 1);
+}
+
+// 指针落在界面控件上时不要影响花朵（否则点左下角按钮，花会收起来）
+const UI_SEL = '.tools, .hint, .cam, .hud, .veil, .shot';
+function overUI(e) {
+  const t = e.target;
+  return !!(t && t.closest && t.closest(UI_SEL));
+}
+
+window.addEventListener('pointermove', (e) => {
+  if (overUI(e)) return;
+  state.mouseX = e.clientX; state.mouseY = e.clientY;
+  if (!state.mouseMode) return;
+  state.pointer = pointerToBloom(e.clientY);
+}, { passive: true });
+window.addEventListener('touchmove', (e) => {
+  if (!e.touches[0] || overUI(e)) return;
+  state.mouseX = e.touches[0].clientX; state.mouseY = e.touches[0].clientY;
+  if (!state.mouseMode) return;
+  state.pointer = pointerToBloom(e.touches[0].clientY);
+}, { passive: true });
+window.addEventListener('touchstart', (e) => {
+  if (!e.touches[0] || overUI(e)) return;
+  state.mouseX = e.touches[0].clientX; state.mouseY = e.touches[0].clientY;
+  if (!state.mouseMode) return;
+  state.pointer = pointerToBloom(e.touches[0].clientY);
+}, { passive: true });
+
+/* ---------- 全屏 ---------- */
+const btnFull = document.getElementById('btnFull');
+const CAN_FULLSCREEN = !!(document.documentElement.requestFullscreen
+  || document.documentElement.webkitRequestFullscreen);
+
+if (!CAN_FULLSCREEN) {
+  // iPhone Safari 至今不支持 Fullscreen API，按钮点了只会毫无反应 —— 直接不显示
+  btnFull.style.display = 'none';
+} else {
+  btnFull.addEventListener('click', () => {
+    if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+      const el = document.documentElement;
+      const req = el.requestFullscreen || el.webkitRequestFullscreen;
+      try { const p = req.call(el); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+    } else {
+      const exit = document.exitFullscreen || document.webkitExitFullscreen;
+      try { const p = exit.call(document); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+    }
+  });
+}
+
+const btnMouse = document.getElementById('btnMouse');
+
+function setHintMode(isMouse) {
+  const kF = hFist.querySelector('.k'), dF = hFist.querySelector('.d');
+  const kO = hOpen.querySelector('.k'), dO = hOpen.querySelector('.d');
+  const kT = hTurn.querySelector('.k'), dT = hTurn.querySelector('.d');
+  if (isMouse) {
+    kF.textContent = IS_TOUCH ? '手指下滑' : '向下移动';
+    dF.textContent = '收拢 · 花苞';
+    kO.textContent = IS_TOUCH ? '手指上滑' : '向上移动';
+    dO.textContent = IS_TOUCH ? '控制花开 · 跟随手指' : '控制花开 · 跟随指针';
+    kT.textContent = IS_TOUCH ? '左右滑动' : '左右移动';
+    dT.textContent = '旋转花盘';
+  } else {
+    kF.textContent = '握拳';
+    dF.textContent = '收拢 · 花苞';
+    kO.textContent = '张开手掌';
+    dO.textContent = '控制花瓣 · 自动跟随';
+    kT.textContent = '左右转手';
+    dT.textContent = '旋转 · 远近缩放';
+  }
+}
+
+btnMouse.addEventListener('click', () => {
+  // 手机端不再偷偷在后台请求摄像头：iOS / 微信常会把这种非用户手势请求拦掉。
+  // 用户点「开启摄像头」的这一刻同步发起权限请求，成功率最高。
+  if (IS_TOUCH && state.mouseMode && !cameraStream) {
+    btnMouse.classList.add('on');
+    btnMouse.lastChild.textContent = '正在开启…';
+    startCamera(true).catch(() => {
+      btnMouse.lastChild.textContent = '重试摄像头';
+    });
+    return;
+  }
+
+  if (state.mouseMode) {
+    // 尝试回到手势模式
+    if (window.__handReady && !state.camFailed) {
+      state.mouseMode = false;
+      btnMouse.classList.remove('on');
+      btnMouse.lastChild.textContent = IS_TOUCH ? '手指模式' : '鼠标模式';
+      campanel.classList.add('on');
+      hud.classList.add('on');
+      setHintMode(false);
+    }
+  } else {
+    state.mouseMode = true;
+    btnMouse.classList.add('on');
+    btnMouse.lastChild.textContent = IS_TOUCH ? '开启摄像头' : '手势模式';
+    campanel.classList.remove('on');
+    hud.classList.add('on');
+    setHintMode(true);
+  }
+});
+
+/* ---------- 背景音乐 ---------- */
+const bgm = document.getElementById('bgm');
+const btnMusic = document.getElementById('btnMusic');
+const meq = document.getElementById('meq');
+const mtext = document.getElementById('mtext');
+const mtip = document.getElementById('mtip');
+
+// 提示条：自动播放被拦时露出来，播上了就收回去
+function showMusicTip(on) {
+  mtip.classList.toggle('on', !!on);
+  if (on) btnMusic.classList.add('needtap');
+  else btnMusic.classList.remove('needtap');
+}
+
+const MUSIC_VOL = 0.52;
+let musicWanted = true;      // 用户是否希望有音乐（点暂停后为 false）
+let musicStarted = false;
+
+/* ---- 音频分析：让花朵跟着音乐呼吸 ---- */
+// ⚠️ createMediaElementSource 一旦接管音频，声音就只能从 AudioContext 出来。
+// 所以必须先确认 context 能 running 再接管，否则会彻底没声音。
+let actx = null, analyser = null, freqData = null, gainNode = null;
+let audioReady = false, audioTries = 0;
+
+async function ensureAudioGraph() {
+  if (audioReady) return true;
+  if (audioTries >= 4) return false;   // 允许重试：第一次可能没有用户手势
+  audioTries++;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) { audioTries = 99; return false; }
+
+    const c = new AC();
+    if (c.state === 'suspended') await c.resume();
+    if (c.state !== 'running') {
+      // 拿不到 running 就绝不接管音频，让 <audio> 自己出声
+      try { c.close(); } catch (e) {}
+      return false;
+    }
+
+    actx = c;
+    const src = c.createMediaElementSource(bgm);
+    const an = c.createAnalyser();
+    an.fftSize = 512;
+    an.smoothingTimeConstant = 0.70;
+    gainNode = c.createGain();
+    gainNode.gain.value = bgm.volume;      // 接管后改用 GainNode 控音量
+    src.connect(an);
+    an.connect(gainNode);
+    gainNode.connect(c.destination);
+
+    analyser = an;
+    freqData = new Uint8Array(an.frequencyBinCount);
+    audioReady = true;
+    return true;
+  } catch (e) {
+    console.warn('音频分析不可用，音乐走普通播放', e);
+    audioReady = false;
+    return false;
+  }
+}
+
+// 统一音量入口：接管后用 GainNode，没接管就用 element 的 volume
+function setVolume(v) {
+  const x = clamp(v, 0, 1);
+  if (gainNode) gainNode.gain.value = x;
+  bgm.volume = x;
+}
+function getVolume() {
+  return gainNode ? gainNode.gain.value : bgm.volume;
+}
+
+// 低频能量 0..1：用「慢速基线」提取鼓点 —— 持续的低音被吸收，只有突然变强才算一拍
+let bassBase = 0, bassPrevT = 0;
+function readBass() {
+  if (!audioReady || !analyser || bgm.paused) return 0;
+  analyser.getByteFrequencyData(freqData);
+  let sum = 0;
+  for (let i = 1; i <= 6; i++) sum += freqData[i];   // 约 40–520Hz
+  const raw = sum / (6 * 255);
+
+  const now = performance.now();
+  const dtR = bassPrevT ? Math.min(0.25, (now - bassPrevT) / 1000) : 0.016;
+  bassPrevT = now;
+
+  if (bassBase === 0) bassBase = raw;                // 首帧直接对齐，避免开机就爆
+  bassBase += (raw - bassBase) * Math.min(1, dtR * 0.85);   // 时间常数约 1.2 秒
+  return clamp((raw - bassBase) * 5.5, 0, 1);
+}
+
+function syncMusicBtn() {
+  const on = !bgm.paused && !bgm.ended;
+  btnMusic.classList.toggle('playing', on);
+  meq.style.display = on ? 'inline-flex' : 'none';
+  mtext.style.display = on ? 'none' : 'inline';
+  mtext.textContent = musicStarted ? '播放' : '音乐';
+}
+
+function fadeTo(target, ms) {
+  const from = getVolume();
+  const t0 = performance.now();
+  const step = () => {
+    const k = Math.min(1, (performance.now() - t0) / ms);
+    setVolume(from + (target - from) * (k * k * (3 - 2 * k)));
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+// 尝试播放：先让 <audio> 出声，再异步建立音频图（失败也不影响出声）
+function tryPlayMusic() {
+  if (!musicWanted || !bgm.paused) return;
+
+  setVolume(0);
+  const p = bgm.play();
+
+  const onPlayed = () => {
+    musicStarted = true;
+    showMusicTip(false);
+    fadeTo(MUSIC_VOL, 2200);
+    syncMusicBtn();
+  };
+
+  const onBlocked = () => {
+    syncMusicBtn();
+    // 浏览器拦了自动播放。原来只让按钮闪 9 秒就没了，用户根本注意不到 ——
+    // 现在改成底部冒一条常驻提示，直到真的播起来
+    showMusicTip(true);
+  };
+
+  if (p && p.then) p.then(onPlayed).catch(onBlocked);
+  else onPlayed();
+
+  // 不 await：不能因为音频图建立失败而影响正常播放
+  ensureAudioGraph();
+}
+
+btnMusic.addEventListener('click', () => {
+  if (bgm.paused) {
+    musicWanted = true;
+    tryPlayMusic();
+  } else {
+    musicWanted = false;
+    showMusicTip(false);          // 用户主动暂停，不该再催他点
+    fadeTo(0, 380);
+    setTimeout(() => { if (!musicWanted) bgm.pause(); }, 400);
+    setTimeout(syncMusicBtn, 60);
+  }
+});
+
+// 自动播放被拦截时，任意一次点击/触摸都补上
+function unlockMusic() {
+  if (musicWanted && bgm.paused) tryPlayMusic();
+  else if (!audioReady) ensureAudioGraph();   // 已经在播但还没接上分析 → 借这次手势补
+}
+['pointerdown', 'touchstart', 'keydown'].forEach(ev =>
+  window.addEventListener(ev, unlockMusic, { passive: true })
+);
+
+// 切回标签页时，被系统挂起的 context 要拉回来
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && actx && actx.state === 'suspended') {
+    actx.resume().catch(() => {});
+  }
+});
+
+bgm.addEventListener('play', syncMusicBtn);
+// 真的出声了才收提示条（play 事件在 iOS 上可能早于真正开始解码）
+bgm.addEventListener('playing', () => {
+  showMusicTip(false);
+  syncMusicBtn();
+});
+bgm.addEventListener('pause', syncMusicBtn);
+bgm.addEventListener('error', () => {
+  mtext.textContent = '无音乐';
+  btnMusic.classList.add('on');
+});
+
+syncMusicBtn();
+
+/* ---------- 换色 ---------- */
+const btnHue = document.getElementById('btnHue');
+const hsw = document.getElementById('hsw');
+
+// 基准粉色在色相环上约 0.95，加上偏移就是当前花色
+function updateSwatch() {
+  const h = ((0.95 + state.hueTarget) % 1 + 1) % 1;
+  const css = 'hsl(' + (h * 360).toFixed(0) + ', 78%, 66%)';
+  hsw.style.background = css;
+  hsw.style.boxShadow = '0 0 7px ' + css;
+}
+
+function hueNext() {
+  state.hueIdx = (state.hueIdx + 1) % HUE_SEQ.length;
+  state.hueTarget = HUE_SEQ[state.hueIdx];
+  state.hueTimer = 0;          // 手动换过之后重新计时
+  updateSwatch();
+}
+
+btnHue.addEventListener('click', hueNext);
+updateSwatch();
+
+/* ---------- 保存图片 ---------- */
+const btnShot = document.getElementById('btnShot');
+const shotLayer = document.getElementById('shot');
+const shotImg = document.getElementById('shotimg');
+const shotTip = document.getElementById('shottip');
+const shotDl = document.getElementById('shotdl');
+const shotClose = document.getElementById('shotclose');
+let shotPending = false;
+let shotURL = null, shotName = '';
+
+// 触屏设备（手机 / 平板）—— 这类设备上 <a download> 基本不可用
+// 定义放在靠前的位置：文案、保存、全屏按钮都要用它判断
+btnShot.addEventListener('click', () => {
+  // 自适应画质把分辨率降过、或粒子被抽稀过 —— 截图前先拉满，不然存下来是糊的
+  qualityLock = true;
+  if (DPRCAP < 2) { DPRCAP = 2; shotBoostDpr = true; resize(); }
+  if (drawCount < COUNT) { shotBoostDraw = drawCount; drawCount = COUNT; }
+  // 等下一帧渲染完成再取，保证拿到的是完整画面
+  shotPending = true;
+  btnShot.classList.add('on');
+});
+
+function openShotLayer(url, name) {
+  if (shotURL && shotURL !== url) { /* data URL 无需释放 */ }
+  shotURL = url; shotName = name;
+  shotImg.src = url;
+  // 桌面端也能长按保存，但按钮更顺手；手机上 iOS 完全没有下载按钮，只提示长按
+  shotDl.style.display = IS_IOS ? 'none' : '';
+  shotTip.querySelector('span').innerHTML = IS_TOUCH
+    ? '长按图片 · 选择「<b>保存到相册</b>」'
+    : '已生成图片 · 可下载或直接右键另存';
+  shotLayer.classList.add('on');
+}
+
+function closeShotLayer() {
+  shotLayer.classList.remove('on');
+  // 动画结束后再清，避免闪一下空图
+  setTimeout(() => { if (!shotLayer.classList.contains('on')) shotImg.removeAttribute('src'); }, 340);
+}
+
+shotClose.addEventListener('click', closeShotLayer);
+shotLayer.addEventListener('click', (e) => { if (e.target === shotLayer) closeShotLayer(); });
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && shotLayer.classList.contains('on')) closeShotLayer();
+});
+
+shotDl.addEventListener('click', () => {
+  if (!shotURL) return;
+  const a = document.createElement('a');
+  a.href = shotURL;
+  a.download = shotName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+});
+
+function takeShot() {
+  shotPending = false;
+  btnShot.classList.remove('on');
+  // 导出尺寸兜底：iOS / 微信对超大 base64 图片会渲染失败甚至崩溃，
+  // 最长边压到 2048（手机 canvas 本来就不到这个尺寸，等于不缩）
+  const MAXEDGE = 2048;
+  let src = canvas;
+  const big = Math.max(canvas.width, canvas.height);
+  if (big > MAXEDGE) {
+    const k = MAXEDGE / big;
+    const tmp = document.createElement('canvas');
+    tmp.width = Math.round(canvas.width * k);
+    tmp.height = Math.round(canvas.height * k);
+    const tc = tmp.getContext('2d');
+    tc.imageSmoothingEnabled = true;
+    tc.imageSmoothingQuality = 'high';
+    tc.drawImage(canvas, 0, 0, tmp.width, tmp.height);
+    src = tmp;
+  }
+
+  let url;
+  try {
+    // 手机端走 JPEG：这张图全是高频粒子 + 胶片颗粒，PNG 压不动，
+    // 780×1688 的 PNG 转 base64 有 4MB —— iOS 的 <img> 处理这么大的 data URL
+    // 会直接渲染失败，长按也存不下来。JPEG 0.94 只要几百 KB，肉眼几乎无差。
+    url = IS_TOUCH
+      ? src.toDataURL('image/jpeg', 0.94)
+      : src.toDataURL('image/png');
+  } catch (e) {
+    console.warn('截图失败', e);
+    restoreQuality();
+    return;
+  }
+
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const name = 'fingertip-bloom-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate())
+             + '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds())
+             + (IS_TOUCH ? '.jpg' : '.png');
+
+  if (IS_TOUCH) {
+    // 手机：铺出大图让用户长按存相册（iOS / 安卓 / 微信内都通用）
+    openShotLayer(url, name);
+  } else {
+    // 桌面：直接下载，保持原来的手感
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  // 图已经取到手，把画质降回去省性能。延迟一下等预览层盖上来，
+  // 否则用户会看到画面先糊一帧。
+  restoreQuality();
+}
+
+// 把截图时临时提上去的分辨率 / 粒子数还原
+function restoreQuality() {
+  if (!shotBoostDpr && !shotBoostDraw) { qualityLock = false; return; }
+  const backDpr = shotBoostDpr, backDraw = shotBoostDraw;
+  shotBoostDpr = false; shotBoostDraw = 0;
+  setTimeout(() => {
+    if (backDraw) drawCount = backDraw;
+    if (backDpr && DPRCAP > MOBILE_DPRCAP) { DPRCAP = MOBILE_DPRCAP; resize(); }
+    qualityLock = false;
+  }, 320);
+}
+
+/* ---------------- 4. 手部识别 ---------------- */
+const video = document.getElementById('cam');
+const camcv = document.getElementById('camcv');
+const camctx = camcv.getContext('2d');
+
+const HAND_CONN = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],
+  [13,17],[17,18],[18,19],[19,20],
+  [0,17]
+];
+
+const veil = document.getElementById('veil');
+const vmsg = document.getElementById('vmsg');
+const vtitle = document.getElementById('vtitle');
+const vgo = document.getElementById('vgo');
+const vspin = document.getElementById('vspin');
+
+// 在电脑本机打开时，把「手机访问」地址亮出来
+// （服务端 serve.py 绑定了 0.0.0.0，手机连同一个 WiFi 就能开）
+(function showLanHint() {
+  const el = document.getElementById('lanhint');
+  if (!el) return;
+  const h = location.hostname;
+  if (!(h === 'localhost' || h === '127.0.0.1' || h === '::1')) return;
+  fetch('/__lanip').then((r) => r.json()).then((d) => {
+    if (!d || !d.ips || !d.ips.length) return;
+    el.innerHTML = '手机也想看？连同一个 WiFi 后打开<br><b>http://'
+      + d.ips[0] + ':' + d.port + '/</b>';
+    el.classList.add('on');
+  }).catch(() => {});
+})();
+
+const vretry = document.getElementById('vretry');
+const vskip = document.getElementById('vskip');
+let landmarker = null;
+let modelPromise = null;
+let skipModel = false;      // 用户主动放弃手势加载
+let introReleased = false;  // 已经先进到花朵，不允许后台加载再把引导页拉回来
+
+// 体验优先：模型 / 摄像头永远在后台准备，绝不能挡住花朵本身。
+// 这和「模型失败后的降级」不同：这里仍会继续加载，成功后自动切回手势模式。
+function enterInstantExperience() {
+  if (introReleased || state.ready) return;
+  introReleased = true;
+  veil.classList.add('gone');
+  ui.classList.add('on');
+  state.mouseMode = true;
+  state.camFailed = false;
+  state.ready = true;
+  hud.classList.add('on');
+  campanel.classList.remove('on');
+  // 触屏上保留一个明确的「开启摄像头」按钮：
+  // 摄像头请求由用户点击触发，iOS / 微信不会当作后台弹窗拦掉。
+  btnMouse.style.display = '';
+  btnMouse.classList.add('on');
+  btnMouse.lastChild.textContent = IS_TOUCH ? '开启摄像头' : '鼠标模式';
+  setHintMode(true);
+  tryPlayMusic();
+}
+
+function enterMouseFallback(msg, opts) {
+  opts = opts || {};
+  state.mouseMode = true;
+  state.camFailed = true;
+  btnMouse.classList.add('on');
+  btnMouse.lastChild.textContent = '手势模式';
+  // 手势模式已经不可用，这个按钮点下去不会有任何反应（原来就是个死按钮），
+  // 手机上还会白占一格宽度 —— 干脆收起来
+  btnMouse.style.display = 'none';
+  hud.classList.add('on');
+  campanel.classList.remove('on');
+  setHintMode(true);
+  vtitle.textContent = opts.title || '鼠标模式';
+  vmsg.textContent = msg;
+  vspin.style.display = 'none';
+  vskip.style.display = 'none';       // 已经进降级流程了，跳过按钮没意义
+  vgo.style.display = 'inline-flex';
+  vgo.textContent = opts.btn || '先看看效果';
+  vgo.onclick = () => {
+    veil.classList.add('gone');
+    ui.classList.add('on');
+    state.ready = true;
+    tryPlayMusic();
+  };
+  if (opts.retry) {
+    vretry.style.display = 'inline-flex';
+    vretry.onclick = () => {
+      vretry.style.display = 'none';
+      vgo.style.display = 'none';
+      vtitle.textContent = '正在唤醒花朵';
+      vmsg.textContent = '重新请求摄像头权限…';
+      vspin.style.display = 'block';
+      startCamera();
+    };
+  } else {
+    vretry.style.display = 'none';
+  }
+}
+
+// 载入手部识别模型（只做一次，失败可重试）
+//
+// ⚠️ 这里每个 await 都必须带超时。MediaPipe 的 GPU delegate 在 iOS Safari 上
+// 有概率「永久挂起」——既不 resolve 也不 reject。await 一个永远不返回的 Promise
+// 会让页面永远停在「载入手部识别模型…」，这正是苹果手机上卡死的原因。
+function withTimeout(p, ms, label) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error((label || '') + ' 超时 ' + ms + 'ms')), ms);
+    p.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); }
+    );
+  });
+}
+
+function loadModel() {
+  if (landmarker) return Promise.resolve(true);
+  if (modelPromise) return modelPromise;
+  modelPromise = (async () => {
+    let HandLandmarker, FilesetResolver;
+    try {
+      // 137KB 的 ESM 包，正常 1 秒内
+      const mod = await withTimeout(import('./vendor/vision_bundle.mjs'), 20000, '模块');
+      HandLandmarker = mod.HandLandmarker;
+      FilesetResolver = mod.FilesetResolver;
+    } catch (err) {
+      console.warn('MediaPipe 加载失败', err);
+      modelPromise = null;
+      return false;
+    }
+    const build = async (delegate) => {
+      const fileset = await FilesetResolver.forVisionTasks('./vendor/wasm');
+      return HandLandmarker.createFromOptions(fileset, {
+        baseOptions: { modelAssetPath: './vendor/hand_landmarker.task', delegate: delegate },
+        runningMode: 'VIDEO',
+        numHands: 1,
+        minHandDetectionConfidence: 0.5,
+        minHandPresenceConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+    };
+
+    // iOS Safari 的 WebGL delegate 不可靠（会挂起），而 CPU 在手机上跑 640×480
+    // 完全够用 —— 苹果设备直接走 CPU，跳过 GPU 那一轮
+    const plan = IS_IOS
+      ? [['CPU', 34000]]
+      : [['GPU', 13000], ['CPU', 34000]];
+
+    for (let i = 0; i < plan.length; i++) {
+      const delegate = plan[i][0], ms = plan[i][1];
+      try {
+        landmarker = await withTimeout(build(delegate), ms, delegate);
+        window.__handReady = true;
+        window.__delegate = delegate;
+        return true;
+      } catch (err) {
+        console.warn(delegate + ' 初始化失败', err);
+      }
+    }
+    modelPromise = null;
+    return false;
+  })();
+  return modelPromise;
+}
+
+// 摄像头权限要在「点按钮」那个用户手势里立刻请求；
+// 如果等模型下载完再请求，iOS / 微信经常会把它当后台弹窗直接拒掉。
+let cameraStream = null;
+let cameraRequest = null;
+function requestCameraAccess() {
+  if (cameraStream && cameraStream.active) return Promise.resolve(cameraStream);
+  if (cameraRequest) return cameraRequest;
+  if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    return Promise.reject(new Error('此环境不支持摄像头'));
+  }
+  cameraRequest = navigator.mediaDevices.getUserMedia({
+    // ⚠️ 这里全部用 ideal，不加任何 max 硬约束。
+    // 上一版写了 frameRate:{max:24}，很多内置 / USB 摄像头只有 30fps 一档，
+    // 满足不了硬上限时 Chrome 会返回一个「不出帧」的流 —— 面板就是全黑。
+    video: {
+      facingMode: 'user',
+      width: { ideal: 640 },
+      height: { ideal: 480 }
+    },
+    audio: false
+  }).then((stream) => {
+    cameraStream = stream;
+    cameraRequest = null;
+    return stream;
+  }, (err) => {
+    cameraRequest = null;
+    throw err;
+  });
+  return cameraRequest;
+}
+
+async function startCamera(fromUserTap) {
+  // 先抢到权限，模型在后面慢慢初始化。只有 fromUserTap 才会在这里调用，
+  // 因而 getUserMedia 确实属于用户手势，不会丢权限弹窗。
+  const earlyStream = fromUserTap ? requestCameraAccess() : null;
+  const ok = await loadModel();
+  if (skipModel) return;      // 等模型期间用户已经点了「跳过」
+  if (!ok) {
+    // 页面已经先进到花朵了：后台模型失败只保留手指/鼠标模式，
+    // 绝不能再把用户拉回遮罩页。
+    if (introReleased || state.ready) return;
+    enterMouseFallback(
+      '手部识别模型没能加载。\n' +
+      '可以先用鼠标／手指滑动控制花朵。',
+      { retry: true, title: '模型加载失败' }
+    );
+    return;
+  }
+
+  let stream;
+  try {
+    // fromUserTap 时用的是按钮刚点下去就开始的 Promise；其他情况才在这里申请。
+    stream = await (earlyStream || requestCameraAccess());
+  } catch (err) {
+    console.warn('摄像头失败', err);
+    // 用户已经在玩花了，权限被拒也只是不切换手势模式，不能重新盖住整页。
+    if (introReleased || state.ready) {
+      btnMouse.classList.add('on');
+      btnMouse.lastChild.textContent = IS_TOUCH ? '重试摄像头' : '鼠标模式';
+      return;
+    }
+    const denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+    enterMouseFallback(
+      denied
+        ? '浏览器拒绝了摄像头权限。\n\n' +
+          '点地址栏左侧的小图标 → 允许摄像头，\n' +
+          '再点下面重试。'
+        : '没有找到可用的摄像头。\n' +
+          '可以先用鼠标／手指滑动控制花朵。',
+      { retry: true, title: '摄像头未开启' }
+    );
+    return;
+  }
+
+  video.srcObject = stream;
+  await video.play().catch(() => {});
+  if (skipModel) {                       // 请求摄像头期间用户点了「跳过」
+    stream.getTracks().forEach((t) => t.stop());
+    return;
+  }
+
+  veil.classList.add('gone');
+  campanel.classList.add('on');
+  hud.classList.add('on');
+  state.mouseMode = false;
+  state.camFailed = false;
+  state.ready = true;
+  btnMouse.classList.remove('on');
+  btnMouse.lastChild.textContent = IS_TOUCH ? '手指模式' : '鼠标模式';
+  btnMouse.style.display = '';   // 手势模式恢复了，允许切回去
+  tryPlayMusic();
+  startDetect();
+  startCamWatchdog();
+}
+
+// 摄像头看门狗：拿到流 ≠ 有画面。
+// 真实设备上常见「track 是 live，但 currentTime 不推进」的黑屏，
+// 而本地假摄像头永远测不出来。这里做两级自愈：
+//   第 1 级：重新 play()
+//   第 2 级：丢掉这个流，用最宽松的约束重新要一个
+let camWatchdog = null;
+function startCamWatchdog() {
+  clearInterval(camWatchdog);
+  let ticks = 0, lastCt = -1;
+  camWatchdog = setInterval(async () => {
+    if (!cameraStream) { clearInterval(camWatchdog); camWatchdog = null; return; }
+    // currentTime 在走 → 说明真的在出帧，收工
+    if (video.currentTime > 0.05 && video.currentTime !== lastCt) {
+      clearInterval(camWatchdog); camWatchdog = null; return;
+    }
+    lastCt = video.currentTime;
+    ticks++;
+    if (ticks === 2) {
+      console.warn('摄像头未出帧，重新 play()');
+      try { await video.play(); } catch (e) {}
+    } else if (ticks === 4) {
+      console.warn('摄像头仍未出帧，用最宽松约束重新请求');
+      await restartCameraStream();
+    } else if (ticks >= 8) {
+      clearInterval(camWatchdog); camWatchdog = null;
+      setCamNotice('摄像头画面没响应 · 点这里重试');
+    }
+  }, 1200);
+}
+
+async function restartCameraStream() {
+  try {
+    cameraRequest = null;
+    // 不给任何约束，让浏览器自己挑它能出的那一档
+    const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    const old = cameraStream;
+    cameraStream = s;
+    video.srcObject = s;
+    await video.play().catch(() => {});
+    // 新流接上之后再停旧的，避免中间闪一下黑
+    if (old) old.getTracks().forEach((t) => t.stop());
+  } catch (e) {
+    console.warn('重试摄像头失败', e);
+  }
+}
+
+// 摄像头面板里的提示（画面出不来时给个能点的出路）
+function setCamNotice(text) {
+  const el = document.getElementById('camnotice');
+  if (!el) return;
+  if (!text) { el.classList.remove('on'); return; }
+  el.textContent = text;
+  el.classList.add('on');
+}
+
+document.getElementById('camnotice').addEventListener('click', async () => {
+  setCamNotice('正在重试…');
+  await restartCameraStream();
+  setCamNotice('');
+  startCamWatchdog();
+});
+
+let detectStarted = false;
+function startDetect() {
+  if (detectStarted) return;
+  detectStarted = true;
+  let lastVideoTime = -1;
+  let lastDetect = 0;
+  const dbg = { calls: 0, hits: 0, err: '', skipped: 0 };
+  window.__dbgDetect = dbg;
+
+  function detect(now) {
+    requestAnimationFrame(detect);
+    if (!state.ready) return;
+    if (state.mouseMode) return;
+    if (video.readyState < 2) return;
+    // 手势识别不需要逐帧跑。手机 12fps 已足够连贯，还能留出 CPU 给音频解码，
+    // 避免背景音乐「一卡一卡」。桌面保持约 35fps。
+    if (now - lastDetect < (IS_TOUCH ? 82 : 28)) return;
+    lastDetect = now;
+
+    if (video.currentTime === lastVideoTime) { dbg.skipped++; return; }
+    lastVideoTime = video.currentTime;
+
+    let res;
+    try {
+      res = landmarker.detectForVideo(video, now);
+      dbg.calls++;
+    } catch (e) { dbg.err = String(e && e.message || e); return; }
+
+    drawCam(res);
+
+    if (res && res.landmarks && res.landmarks.length > 0) {
+      dbg.hits++;
+      const lm = res.landmarks[0];
+      const open = handOpenness(lm);
+      const motion = handMotion(lm);
+      state.target = open;
+      state.handActive = true;
+      state.lastHandAt = now;
+      // 手的位置用于视差
+      state.handX = lm[9].x;
+      state.handY = lm[9].y;
+      state.spinTarget = motion.spin;
+      state.scaleTarget = motion.scale;
+      updatePinchColor(lm, open, now);
+      const hs = res.handednesses || res.handedness;
+      if (hs && hs[0] && hs[0][0]) state.handConf = hs[0][0].score;
+      else state.handConf = 0.7 + open * 0.25;
+    } else {
+      // 丢失手：缓慢回到半收
+      if (now - state.lastHandAt > 500) {
+        state.handActive = false;
+        state.target = 0.10;
+        state.spinTarget = 0;
+        state.scaleTarget = 1;
+        state.pinchArmed = true;
+        state.handConf *= 0.9;
+      }
+    }
+  }
+  requestAnimationFrame(detect);
+}
+
+async function boot() {
+  ui.classList.add('on');
+
+  // file:// 下浏览器禁用摄像头，且无法加载 ESM 模块
+  if (location.protocol === 'file:') {
+    enterMouseFallback(
+      '浏览器不允许 file:// 页面调用摄像头，\n' +
+      '这是 Chrome / Edge 的硬性限制，改代码绕不过去。\n\n' +
+      '解决办法（10 秒）：\n' +
+      '1. 关掉本页\n' +
+      '2. 双击同文件夹里的「启动花朵.vbs」\n' +
+      '3. 新页面会自动打开并询问摄像头权限\n\n' +
+      '没有 .vbs 就双击 start.bat，效果一样。',
+      { title: '双击「启动花朵.vbs」即可', btn: '先用鼠标看效果' }
+    );
+    return;
+  }
+
+  // 体验优先：这里必须**同步**放用户进花朵，绝不能先碰 MediaPipe。
+  // createFromOptions 在部分 iPhone 上会短暂占住主线程；即便用 setTimeout，
+  // 只要先调用了它，定时器也没有机会执行，页面看起来还是「进不去」。
+  enterInstantExperience();
+
+  // 模型晚一点后台预热：让浏览器至少先把花朵与 UI 画出一帧。
+  // 手机只预热模型，不主动请求摄像头——要由「开启摄像头」按钮的用户点击触发；
+  // 这样 iOS / 微信才能稳定弹出权限框。桌面仍保持自动打开摄像头。
+  setTimeout(() => {
+    if (IS_TOUCH) {
+      loadModel().catch((err) => console.warn('手势后台预热失败', err));
+    } else {
+      startCamera().catch((err) => console.warn('手势后台启动失败', err));
+    }
+  }, 1200);
+}
+
+// 开合度：指尖到腕点距离均值 / 掌长（实测：完全张开≈1.62，握拳≈0.95）
+function handOpenness(lm) {
+  const w = lm[0], mcp = lm[9];
+  const palm = Math.hypot(w.x - mcp.x, w.y - mcp.y) || 0.001;
+  const tips = [4, 8, 12, 16, 20];
+  let sum = 0;
+  for (const i of tips) {
+    sum += Math.hypot(lm[i].x - w.x, lm[i].y - w.y);
+  }
+  const avg = sum / tips.length / palm;
+  return clamp((avg - 1.02) / (1.58 - 1.02), 0, 1);
+}
+
+// 手掌姿态：腕点 → 中指根部的方向决定滚转，掌宽的相对变化决定远近缩放
+function handMotion(lm) {
+  const wrist = lm[0], middleMcp = lm[9];
+  const dx = -(middleMcp.x - wrist.x);   // 预览是镜像的，方向同步镜像
+  const dy = middleMcp.y - wrist.y;
+  let roll = Math.atan2(dx, -dy);
+  if (Math.abs(roll) < 0.06) roll = 0;   // 微小抖动视为回正
+
+  const palmWidth = Math.hypot(lm[17].x - lm[5].x, lm[17].y - lm[5].y);
+  return {
+    roll,
+    spin: clamp(roll * 0.72, -0.90, 0.90),
+    scale: clamp(0.90 + (palmWidth - 0.15) * 1.25, 0.84, 1.16)
+  };
+}
+
+// 捏合换色：张开手中拇指与食指靠近才触发，必须在松开后重新武装，避免连发
+function updatePinchColor(lm, open, now) {
+  const wrist = lm[0], middleMcp = lm[9];
+  const palm = Math.hypot(wrist.x - middleMcp.x, wrist.y - middleMcp.y) || 0.001;
+  const pinch = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y) / palm;
+
+  if (pinch > 0.50) state.pinchArmed = true;
+  if (state.pinchArmed && pinch < 0.30 && open > 0.42 && now - state.lastPinchAt > 900) {
+    state.pinchArmed = false;
+    state.lastPinchAt = now;
+    state.gestureNote = '捏合 · 已切换花色';
+    state.gestureNoteUntil = now + 1100;
+    hueNext();
+  }
+}
+
+// 画摄像头预览（轻微降饱和 + 粉色骨骼）
+function drawCam(res) {
+  const w = camcv.width, h = camcv.height;
+  camctx.save();
+  camctx.clearRect(0, 0, w, h);
+
+  // 镜像 + 轻微降饱和（保留真实颜色，只压一点饱和和亮度让它融入暗色背景，
+  // 粉色骨骼线依然够醒目。原来是 grayscale(1) 全灰度，看着像监控）
+  camctx.translate(w, 0);
+  camctx.scale(-1, 1);
+  camctx.filter = 'saturate(.88) contrast(1.05) brightness(.96)';
+  try { camctx.drawImage(video, 0, 0, w, h); } catch (e) {}
+  camctx.filter = 'none';
+  camctx.restore();
+
+  // 压暗边缘
+  const vg = camctx.createRadialGradient(w / 2, h / 2, h * 0.15, w / 2, h / 2, h * 0.85);
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(1, 'rgba(10,4,9,.62)');
+  camctx.fillStyle = vg;
+  camctx.fillRect(0, 0, w, h);
+
+  if (!res || !res.landmarks || !res.landmarks.length) return;
+
+  const lm = res.landmarks[0];
+  const px = (i) => [(1 - lm[i].x) * w, lm[i].y * h];
+
+  camctx.lineWidth = 1.6;
+  camctx.strokeStyle = 'rgba(255,120,155,.92)';
+  camctx.shadowColor = 'rgba(255,90,140,.9)';
+  camctx.shadowBlur = 7;
+  camctx.beginPath();
+  for (const [a, b] of HAND_CONN) {
+    const [ax, ay] = px(a), [bx, by] = px(b);
+    camctx.moveTo(ax, ay);
+    camctx.lineTo(bx, by);
+  }
+  camctx.stroke();
+
+  camctx.shadowBlur = 5;
+  camctx.fillStyle = 'rgba(255,205,220,.95)';
+  for (let i = 0; i < lm.length; i++) {
+    const [x, y] = px(i);
+    camctx.beginPath();
+    camctx.arc(x, y, i % 4 === 0 ? 2.2 : 1.5, 0, Math.PI * 2);
+    camctx.fill();
+  }
+  camctx.shadowBlur = 0;
+}
+
+/* ---------------- 5. 渲染循环 ---------------- */
+let t0 = performance.now();
+let lastT = t0;
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.05, (now - lastT) / 1000);
+  lastT = now;
+  const time = (now - t0) / 1000;
+
+  // 目标值
+  let tgt;
+  if (state.mouseMode) {
+    tgt = 0.06 + state.pointer * 0.94;
+  } else {
+    tgt = state.handActive ? state.target : 0.10;
+  }
+  // 平滑跟随
+  const k = 1 - Math.pow(0.001, dt);   // 帧率无关平滑
+  state.bloom += (tgt - state.bloom) * Math.min(1, k * 0.85);
+  state.bloom = clamp(state.bloom, 0, 1);
+
+  // UI 节流
+  if (now - (frame._ui || 0) > 90) {
+    frame._ui = now;
+    updateUI();
+  }
+
+  // 入场生长
+  if (state.ready) state.intro = Math.min(1, state.intro + dt * 0.62);
+
+  // 自适应画质：连续低帧就先降渲染分辨率，还不行就抽稀粒子
+  if (state.ready && !qualityLock) {
+    frame._pa = (frame._pa || 0) + dt;
+    frame._pn = (frame._pn || 0) + 1;
+    if (frame._pn >= 100) {
+      const avg = frame._pa / frame._pn;
+      if (avg > 0.036 && DPRCAP > 1) {          // 低于约 28fps
+        DPRCAP = 1;
+        resize();
+      } else if (avg > 0.042 && drawCount > COUNT * 0.55) {
+        drawCount = Math.floor(COUNT * 0.62);   // 还是卡就抽稀
+      }
+      frame._pa = 0; frame._pn = 0;
+    }
+  }
+
+  // 开合变化 → 脉冲（花朵会随手势轻轻震颤）
+  const dBloom = Math.abs(state.bloom - state.prevBloom);
+  state.prevBloom = state.bloom;
+  if (dBloom > 0.003) state.pulse = Math.min(1, state.pulse + dBloom * 3.4);
+  state.pulse *= Math.pow(0.015, dt);
+
+  // 自动换色：每 9.5 秒平滑过渡到下一个色相（只走 蓝紫→粉→蜜桃，避开绿色）
+  state.hueTimer += dt;
+  if (state.hueTimer > 9.5) {
+    state.hueTimer = 0;
+    state.hueIdx = (state.hueIdx + 1) % HUE_SEQ.length;
+    state.hueTarget = HUE_SEQ[state.hueIdx];
+    updateSwatch();
+  }
+  state.hue += (state.hueTarget - state.hue) * Math.min(1, dt * 1.8);
+
+  // 音乐驱动：低频能量（鼓点 / 贝斯）平滑后驱动花朵呼吸
+  const bass = readBass();
+  state.beat += (bass - state.beat) * Math.min(1, dt * 14);
+
+  // 绽放瞬间：bloom 越过 0.88 时闪一次
+  if (state.bloom > 0.88 && state.prevBloomForBurst <= 0.88) state.burst = 1;
+  state.prevBloomForBurst = state.bloom;
+  state.burst *= Math.pow(0.015, dt);
+
+  // 旋转与缩放目标：鼠标横移 / 手掌滚转与远近
+  let spinTgt = 0, scaleTgt = 1;
+  let ptx = 0, pty = 0;
+  if (state.mouseMode) {
+    spinTgt = clamp((state.mouseX / window.innerWidth - 0.5) * 1.15, -0.55, 0.55);
+    ptx = (state.mouseX / window.innerWidth - 0.5) * 2;
+    pty = -(state.mouseY / window.innerHeight - 0.5) * 2;
+  } else if (state.handActive) {
+    spinTgt = state.spinTarget;
+    scaleTgt = state.scaleTarget;
+    ptx = (0.5 - state.handX) * 2;
+    pty = (state.handY - 0.5) * 2;
+  }
+  state.spin += (spinTgt - state.spin) * Math.min(1, dt * 6.5);
+  state.scale += (scaleTgt - state.scale) * Math.min(1, dt * 3.2);
+
+  // 视差
+  state.parTarget.x = clamp(ptx, -1, 1) * 1.1;
+  state.parTarget.y = clamp(pty, -1, 1) * 1.1;
+  const pk = Math.min(1, dt * 3.4);
+  state.par.x += (state.parTarget.x - state.par.x) * pk;
+  state.par.y += (state.parTarget.y - state.par.y) * pk;
+
+  const portrait = H > W * 1.12;
+  // 横屏手机屏幕矮，用桌面那套系数花朵会小得可怜，单独放大一档
+  const landscapePhone = window.innerHeight < 560 && window.innerWidth > window.innerHeight;
+  const pxPerUnit = Math.min(W, H) * (portrait ? 0.375 : landscapePhone ? 0.36 : 0.30);
+
+  /* ---------- Pass 1：场景 → 离屏 ---------- */
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene.fb);
+  gl.viewport(0, 0, W, H);
+  gl.disable(gl.BLEND);
+
+  gl.useProgram(bgProg);
+  gl.uniform2f(bgResLoc, W, H);
+  gl.uniform1f(bgTimeLoc, time);
+  gl.uniform1f(bgBloomLoc, state.bloom);
+  gl.uniform1f(bgHueLoc, state.hue);
+  drawQuad(bgPosLoc);
+
+  // 粒子（加法混合）
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE);
+  gl.useProgram(ptProg);
+
+  const bind = (buf, location, size) => {
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.enableVertexAttribArray(location);
+    gl.vertexAttribPointer(location, size, gl.FLOAT, false, 0, 0);
+  };
+  bind(bufBud, loc.bud, 3);
+  bind(bufOpen, loc.open, 3);
+  bind(bufCol, loc.col, 3);
+  bind(bufSize, loc.size, 1);
+  bind(bufSeed, loc.seed, 1);
+  bind(bufDelay, loc.delay, 1);
+  bind(bufKind, loc.kind, 1);
+
+  gl.uniform1f(loc.bloom, state.bloom);
+  gl.uniform1f(loc.pulse, state.pulse);
+  gl.uniform1f(loc.hue, state.hue);
+  gl.uniform1f(loc.beat, state.beat);
+  gl.uniform1f(loc.burst, state.burst);
+  gl.uniform1f(loc.time, time);
+  gl.uniform2f(loc.res, W, H);
+  gl.uniform1f(loc.px, pxPerUnit);
+  gl.uniform1f(loc.dpr, DPR);
+  // 小屏上粒子相对花瓣更大、重叠更多 → 按 CSS 像素密度收一点，避免糊成一团
+  gl.uniform1f(loc.pxk, clamp(pxPerUnit / (DPR * 200), 0.72, 1.12));
+  gl.uniform1f(loc.yoff, portrait ? 0.34 : 0.20);
+  gl.uniform1f(loc.intro, state.intro);
+  gl.uniform2f(loc.par, state.par.x, state.par.y);
+  gl.uniform1f(loc.spin, state.spin);
+  gl.uniform1f(loc.scale, state.scale);
+
+  gl.drawArrays(gl.POINTS, 0, drawCount);
+
+  /* ---------- Pass 2：亮部提取 → 1/4 分辨率 ---------- */
+  gl.disable(gl.BLEND);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fboGlowA.fb);
+  gl.viewport(0, 0, fboGlowA.w, fboGlowA.h);
+  gl.useProgram(brightProg);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, fboScene.tex);
+  gl.uniform1i(postLoc.bright.tex, 0);
+  gl.uniform2f(postLoc.bright.texel, 1 / W, 1 / H);
+  gl.uniform1f(postLoc.bright.thr, 0.62);
+  drawQuad(postLoc.bright.pos);
+
+  /* ---------- Pass 3：分离式高斯模糊（两轮） ---------- */
+  gl.useProgram(blurProg);
+  gl.uniform1i(postLoc.blur.tex, 0);
+  for (let i = 0; i < 2; i++) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fboGlowB.fb);
+    gl.viewport(0, 0, fboGlowB.w, fboGlowB.h);
+    gl.bindTexture(gl.TEXTURE_2D, fboGlowA.tex);
+    gl.uniform2f(postLoc.blur.dir, 1.1 / fboGlowA.w, 0);
+    drawQuad(postLoc.blur.pos);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fboGlowA.fb);
+    gl.viewport(0, 0, fboGlowA.w, fboGlowA.h);
+    gl.bindTexture(gl.TEXTURE_2D, fboGlowB.tex);
+    gl.uniform2f(postLoc.blur.dir, 0, 1.1 / fboGlowB.h);
+    drawQuad(postLoc.blur.pos);
+  }
+
+  /* ---------- Pass 4：合成到屏幕 ---------- */
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, W, H);
+  gl.useProgram(compProg);
+
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, fboScene.tex);
+  gl.uniform1i(postLoc.comp.scene, 0);
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, fboGlowA.tex);
+  gl.uniform1i(postLoc.comp.glow, 1);
+
+  gl.uniform2f(postLoc.comp.res, W, H);
+  gl.uniform1f(postLoc.comp.time, time);
+  gl.uniform1f(postLoc.comp.amt, 0.62);
+  gl.uniform1f(postLoc.comp.intro, state.intro);
+  gl.uniform1f(postLoc.comp.beat, state.beat);
+  gl.uniform1f(postLoc.comp.burst, state.burst);
+  drawQuad(postLoc.comp.pos);
+  gl.activeTexture(gl.TEXTURE0);
+
+  if (shotPending) takeShot();
+}
+
+requestAnimationFrame(frame);
+
+// 调试入口（供预览/截图用）
+window.__debug = {
+  state,
+  setOpen(v) { state.mouseMode = true; state.pointer = clamp(v, 0, 1); },
+  setHue(v) { state.hue = v; state.hueTarget = v; state.hueTimer = 0; },
+  setHand(open = 0.75, spin = 0, scale = 1) {
+    state.mouseMode = false;
+    state.handActive = true;
+    state.target = clamp(open, 0, 1);
+    state.spinTarget = clamp(spin, -0.90, 0.90);
+    state.scaleTarget = clamp(scale, 0.84, 1.16);
+  },
+  clearHand() {
+    state.handActive = false;
+    state.target = 0.10;
+    state.spinTarget = 0;
+    state.scaleTarget = 1;
+  },
+  audio() {
+    return {
+      ctx: actx ? actx.state : 'none',
+      ready: audioReady,
+      tries: audioTries,
+      paused: bgm.paused,
+      t: +bgm.currentTime.toFixed(2),
+      vol: +bgm.volume.toFixed(2),
+      gain: gainNode ? +gainNode.gain.value.toFixed(2) : null,
+      beat: +state.beat.toFixed(3)
+    };
+  }
+};
+
+/* ---------------- 6. 启动 ---------------- */
+window.addEventListener('load', () => {
+  boot().catch((e) => {
+    console.error(e);
+    enterMouseFallback('初始化异常，已切换到鼠标模式。');
+  });
+});
+</script>
+</body>
+</html>
