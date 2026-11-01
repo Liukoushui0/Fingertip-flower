@@ -261,10 +261,10 @@
     .tools{left:16px;bottom:14px;gap:7px}
     .btn{font-size:9px;padding:7px 11px}
   }
-  /* 窄屏（360 / 375）：5 个按钮并排会贴到右边缘，收紧一档 */
+  /* 窄屏（360 / 375）：6 个按钮弹性平分宽度，避免贴到右边缘 */
   @media (max-width:379px){
-    .tools{left:12px;bottom:16px;gap:5px}
-    .btn{padding:7px 8px;font-size:8.5px;letter-spacing:.06em;gap:4px}
+    .tools{left:10px;right:10px;bottom:16px;gap:4px}
+    .tools .btn{flex:1;justify-content:center;padding:7px 5px;font-size:8.5px;letter-spacing:.03em;gap:3px}
     .btn svg{width:10px;height:10px}
     .hint{bottom:66px;gap:11px}
     .hint .it{gap:6px}
@@ -317,7 +317,7 @@
 
   <div class="cam" id="campanel">
     <canvas id="camcv" width="484" height="324"></canvas>
-    <div class="lb"><i></i>HAND TRACKING</div>
+    <div class="lb"><i></i><span id="handTrackLabel">NO HAND</span></div>
     <div class="cnotice" id="camnotice"></div>
   </div>
 
@@ -368,6 +368,18 @@
     <div class="btn clickable" id="btnMouse">
       <svg viewBox="0 0 24 24"><path d="M12 3.5a3 3 0 0 0-3 3v4a3 3 0 0 0 6 0v-4a3 3 0 0 0-3-3Z"/><path d="M12 13.5v7"/></svg>
       鼠标模式
+    </div>
+    <div class="btn clickable" id="btnHands" title="切换单手或双手手势控制">
+      <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 13V9.5a1.2 1.2 0 0 1 2.4 0V12"/>
+        <path d="M7.4 11.5V8.2a1.2 1.2 0 0 1 2.4 0v4.4"/>
+        <path d="M9.8 12.2V6.7a1.2 1.2 0 0 1 2.4 0v7.6"/>
+        <path d="M19 13V9.5a1.2 1.2 0 0 0-2.4 0V12"/>
+        <path d="M16.6 11.5V8.2a1.2 1.2 0 0 0-2.4 0v4.4"/>
+        <path d="M14.2 12.2V6.7a1.2 1.2 0 0 0-2.4 0v7.6"/>
+        <path d="M5 13v4.2A2.8 2.8 0 0 0 7.8 20h8.4a2.8 2.8 0 0 0 2.8-2.8V13"/>
+      </svg>
+      <span id="handModeText">单手</span>
     </div>
     <div class="btn clickable" id="btnFull">
       <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 15v5h-5M20 9V4h-5M4 15v5h5"/></svg>
@@ -795,6 +807,9 @@ uniform float uIntro;
 uniform vec2  uPar;
 uniform float uSpin;
 uniform float uScale;
+uniform float uWind;
+uniform vec2  uLight;
+uniform float uLightAmt;
 
 varying vec3 vCol;
 varying float vA;
@@ -910,6 +925,16 @@ void main(){
   float ca = cos(ang), sa = sin(ang);
   vec3 q = vec3(p.x, p.y * ca - p.z * sa, p.y * sa + p.z * ca);
 
+  // 横扫风力：离花心越远，受力越明显
+  float windWeight = 0.45 + 0.85 * clamp(abs(q.y) + 0.25, 0.0, 1.5);
+  q.x += uWind * (0.045 + windWeight * 0.22);
+  q.y -= abs(uWind) * windWeight * 0.025;
+  q.z += uWind * windWeight * 0.085;
+
+  // 食指指向：以指尖为中心的局部高光
+  vec2 lightPos = uLight * vec2(0.82, 0.64);
+  float lightFocus = (1.0 - smoothstep(0.05, 0.90, length(q.xy - lightPos))) * uLightAmt;
+
   // 视差：近处跟随更多，制造空间纵深
   float dep = 0.5 + clamp(q.z, -1.2, 1.2) * 0.42;
   q.x += uPar.x * (0.03 + dep * 0.075);
@@ -926,8 +951,11 @@ void main(){
 
   // 花心保持暖色（只轻微跟随），花瓣与花粉完整换色
   float hueAmt = (aKind > 0.5 && aKind < 1.5) ? uHue * 0.22 : uHue;
-  vCol = hueShift(aCol, hueAmt) * (0.56 + 0.44 * uBloom) * (1.0 + uBeat * 0.20 + uBurst * 0.55);
-  vA = clamp(0.30 + 0.78 * dof, 0.10, 1.0) * smoothstep(0.0, 0.55, it) * fallFade;
+  vCol = hueShift(aCol, hueAmt) * (0.56 + 0.44 * uBloom)
+    * (1.0 + uBeat * 0.20 + uBurst * 0.55 + lightFocus * 1.85)
+    + vec3(1.0, 0.55, 0.30) * lightFocus * 0.36;
+  vA = clamp(0.30 + 0.78 * dof, 0.10, 1.0)
+    * smoothstep(0.0, 0.55, it) * fallFade * (1.0 + lightFocus * 0.34);
 }`;
 
 const PT_FS = `
@@ -1198,6 +1226,9 @@ const loc = {
   par: gl.getUniformLocation(ptProg, 'uPar'),
   spin: gl.getUniformLocation(ptProg, 'uSpin'),
   scale: gl.getUniformLocation(ptProg, 'uScale'),
+  wind: gl.getUniformLocation(ptProg, 'uWind'),
+  light: gl.getUniformLocation(ptProg, 'uLight'),
+  lightAmt: gl.getUniformLocation(ptProg, 'uLightAmt'),
   dpr: gl.getUniformLocation(ptProg, 'uDpr'),
   pxk: gl.getUniformLocation(ptProg, 'uPxK')
 };
@@ -1251,7 +1282,13 @@ const state = {
   spin: 0, spinTarget: 0,               // 手掌滚转 → 花朵旋转
   scale: 1, scaleTarget: 1,             // 手掌远近 → 花朵缩放
   pinchArmed: true, lastPinchAt: 0,
-  gestureNote: '', gestureNoteUntil: 0
+  gestureNote: '', gestureNoteUntil: 0,
+  twoHandMode: false,
+  handCount: 0,
+  pointing: false,
+  light: { x: 0, y: 0 }, lightTarget: { x: 0, y: 0 }, lightAmt: 0, lightTargetAmt: 0,
+  wind: 0, windVel: 0, windForce: 0,
+  windPrevX: null, windPrevAt: 0
 };
 
 const bdot = document.getElementById('bdot');
@@ -1263,6 +1300,9 @@ const campanel = document.getElementById('campanel');
 const hFist = document.getElementById('hFist');
 const hOpen = document.getElementById('hOpen');
 const hTurn = document.getElementById('hTurn');
+const btnHands = document.getElementById('btnHands');
+const handModeText = document.getElementById('handModeText');
+const handTrackLabel = document.getElementById('handTrackLabel');
 
 // 触屏设备（手机 / 平板）：文案、保存方式、全屏按钮都要按这个分支
 const IS_TOUCH = (window.matchMedia && matchMedia('(pointer:coarse)').matches)
@@ -1305,9 +1345,18 @@ function updateUI() {
     hconf.textContent = '开合 ' + Math.round(g * 100) + '% · 旋转 '
       + (rot > 0 ? '+' : '') + rot + '°';
   } else if (state.handActive) {
-    hname.textContent = GESTURE_NAME[gi];
+    const pointing = state.pointing && state.lightAmt > 0.05;
+    hname.textContent = pointing
+      ? '指尖移光'
+      : (state.twoHandMode && state.handCount < 2
+        ? '等待第二只手'
+        : (state.twoHandMode ? '双手 · ' + GESTURE_NAME[gi] : GESTURE_NAME[gi]));
     if (performance.now() < state.gestureNoteUntil) {
       hconf.textContent = state.gestureNote;
+    } else if (pointing) {
+      hconf.textContent = '食指指向 · 光源跟随';
+    } else if (state.twoHandMode && state.handCount < 2) {
+      hconf.textContent = '检测到 1/2 只手 · 单手临时控制';
     } else {
       const rot = Math.round(state.spin * 180 / Math.PI);
       hconf.textContent = '开合 ' + Math.round(g * 100) + '% · 旋转 '
@@ -1322,7 +1371,8 @@ function updateUI() {
   hFist.classList.toggle('act', gi === 0);
   hOpen.classList.toggle('act', gi === 2);
   hTurn.classList.toggle('act',
-    Math.abs(state.spin) > 0.08 || performance.now() < state.gestureNoteUntil);
+    Math.abs(state.spin) > 0.08 || Math.abs(state.wind) > 0.08
+    || state.lightAmt > 0.08 || performance.now() < state.gestureNoteUntil);
 }
 
 /* ---------- 鼠标 / 触摸模式 ---------- */
@@ -1397,8 +1447,10 @@ function setHintMode(isMouse) {
     dF.textContent = '收拢 · 花苞';
     kO.textContent = '张开手掌';
     dO.textContent = '控制花瓣 · 自动跟随';
-    kT.textContent = '左右转手';
-    dT.textContent = '旋转 · 远近缩放';
+    kT.textContent = state.twoHandMode ? '双手协同' : '转手 · 横扫 · 指向';
+    dT.textContent = state.twoHandMode
+      ? '间距缩放 · 中点带风 · 指食移光'
+      : '旋转花盘 · 风与惯性 · 指食移光';
   }
 }
 
@@ -1433,6 +1485,32 @@ btnMouse.addEventListener('click', () => {
     setHintMode(true);
   }
 });
+
+function syncHandModeButton() {
+  handModeText.textContent = state.twoHandMode ? '双手' : '单手';
+  btnHands.classList.toggle('on', state.twoHandMode);
+  btnHands.setAttribute('aria-pressed', state.twoHandMode ? 'true' : 'false');
+  btnHands.title = state.twoHandMode
+    ? '当前双手模式，点击切回单手'
+    : '当前单手模式，点击启用双手';
+  setHintMode(state.mouseMode);
+}
+
+btnHands.addEventListener('click', () => {
+  state.twoHandMode = !state.twoHandMode;
+  state.windPrevX = null;
+  state.windPrevAt = 0;
+  state.gestureNote = state.twoHandMode
+    ? '双手模式 · 请放入两只手'
+    : '单手模式 · 全部动作由一只手控制';
+  state.gestureNoteUntil = performance.now() + 1700;
+  syncHandModeButton();
+  if (state.twoHandMode && state.ready && !cameraStream) {
+    startCamera(true).catch(() => {});
+  }
+});
+
+syncHandModeButton();
 
 /* ---------- 背景音乐 ---------- */
 const bgm = document.getElementById('bgm');
@@ -1899,10 +1977,10 @@ function loadModel() {
       return HandLandmarker.createFromOptions(fileset, {
         baseOptions: { modelAssetPath: './vendor/hand_landmarker.task', delegate: delegate },
         runningMode: 'VIDEO',
-        numHands: 1,
-        minHandDetectionConfidence: 0.5,
-        minHandPresenceConfidence: 0.5,
-        minTrackingConfidence: 0.5
+        numHands: 2,
+        minHandDetectionConfidence: 0.32,
+        minHandPresenceConfidence: 0.32,
+        minTrackingConfidence: 0.32
       });
     };
 
@@ -2118,25 +2196,15 @@ function startDetect() {
 
     if (res && res.landmarks && res.landmarks.length > 0) {
       dbg.hits++;
-      const lm = res.landmarks[0];
-      const open = handOpenness(lm);
-      const motion = handMotion(lm);
-      state.target = open;
-      state.handActive = true;
-      state.lastHandAt = now;
-      // 手的位置用于视差
-      state.handX = lm[9].x;
-      state.handY = lm[9].y;
-      state.spinTarget = motion.spin;
-      state.scaleTarget = motion.scale;
-      updatePinchColor(lm, open, now);
-      const hs = res.handednesses || res.handedness;
-      if (hs && hs[0] && hs[0][0]) state.handConf = hs[0][0].score;
-      else state.handConf = 0.7 + open * 0.25;
+      applyHandFrame(res, now);
     } else {
       // 丢失手：缓慢回到半收
       if (now - state.lastHandAt > 500) {
         state.handActive = false;
+        state.handCount = 0;
+        state.pointing = false;
+        state.lightTargetAmt = 0;
+        state.windPrevX = null;
         state.target = 0.10;
         state.spinTarget = 0;
         state.scaleTarget = 1;
@@ -2207,8 +2275,8 @@ function handMotion(lm) {
   const palmWidth = Math.hypot(lm[17].x - lm[5].x, lm[17].y - lm[5].y);
   return {
     roll,
-    spin: clamp(roll * 0.72, -0.90, 0.90),
-    scale: clamp(0.90 + (palmWidth - 0.15) * 1.25, 0.84, 1.16)
+    spin: clamp(roll * 1.05, -1.35, 1.35),
+    scale: clamp(0.92 + (palmWidth - 0.15) * 2.5, 0.68, 1.35)
   };
 }
 
@@ -2225,6 +2293,105 @@ function updatePinchColor(lm, open, now) {
     state.gestureNote = '捏合 · 已切换花色';
     state.gestureNoteUntil = now + 1100;
     hueNext();
+  }
+}
+
+function handCenter(lm) {
+  return {
+    x: (lm[0].x + lm[9].x) * 0.5,
+    y: (lm[0].y + lm[9].y) * 0.5
+  };
+}
+
+function fingerExtended(lm, tipIndex, pipIndex, factor = 1.08) {
+  const wrist = lm[0];
+  const tip = lm[tipIndex], pip = lm[pipIndex];
+  return Math.hypot(tip.x - wrist.x, tip.y - wrist.y)
+    > Math.hypot(pip.x - wrist.x, pip.y - wrist.y) * factor;
+}
+
+// 食指伸出、其余三指收拢时进入“指向移光”，避免普通张掌误触发
+function handPointing(lm) {
+  return fingerExtended(lm, 8, 6, 1.10)
+    && !fingerExtended(lm, 12, 10, 1.03)
+    && !fingerExtended(lm, 16, 14, 1.03)
+    && !fingerExtended(lm, 20, 18, 1.03);
+}
+
+function applyHandFrame(res, now) {
+  const maxHands = state.twoHandMode ? 2 : 1;
+  const landmarks = res.landmarks.slice(0, maxHands);
+  if (!landmarks.length) return;
+
+  const scores = res.handednesses || res.handedness || [];
+  const analyses = landmarks.map((lm, index) => {
+    const open = handOpenness(lm);
+    const motion = handMotion(lm);
+    return {
+      lm,
+      open,
+      motion,
+      pointing: handPointing(lm),
+      center: handCenter(lm),
+      confidence: scores[index]?.[0]?.score || (0.7 + open * 0.25)
+    };
+  });
+
+  const count = analyses.length;
+  const pointingHand = analyses.find(hand => hand.pointing);
+  const nextPointing = !!pointingHand;
+  if (state.handCount !== count || state.pointing !== nextPointing) {
+    state.windPrevX = null;
+    state.windPrevAt = 0;
+  }
+  state.handCount = count;
+  state.pointing = nextPointing;
+  state.handActive = true;
+  state.lastHandAt = now;
+  state.handConf = Math.max(...analyses.map(hand => hand.confidence));
+
+  // 指向手暂时退出花朵姿态控制，另一只手继续控制；只有单指指向时才冻结花朵
+  const controls = analyses.filter(hand => !hand.pointing);
+  if (controls.length) {
+    state.target = controls.reduce((sum, hand) => sum + hand.open, 0) / controls.length;
+    state.spinTarget = controls.reduce((sum, hand) => sum + hand.motion.spin, 0) / controls.length;
+
+    if (state.twoHandMode && count >= 2) {
+      const [a, b] = analyses;
+      const handDistance = Math.hypot(a.center.x - b.center.x, a.center.y - b.center.y);
+      state.scaleTarget = clamp(0.82 + (handDistance - 0.28) * 1.8, 0.68, 1.35);
+    } else {
+      state.scaleTarget = controls.reduce((sum, hand) => sum + hand.motion.scale, 0) / controls.length;
+    }
+    for (const hand of controls) updatePinchColor(hand.lm, hand.open, now);
+  }
+
+  state.lightTargetAmt = pointingHand ? 1 : 0;
+  if (pointingHand) {
+    // 与镜像摄像头一致：画面左侧对应光源左侧
+    state.lightTarget.x = clamp((0.5 - pointingHand.lm[8].x) * 2, -1, 1);
+    state.lightTarget.y = clamp((0.5 - pointingHand.lm[8].y) * 2, -1, 1);
+  }
+
+  const positioned = controls.length ? controls : analyses;
+  const centerX = positioned.reduce((sum, hand) => sum + hand.center.x, 0) / positioned.length;
+  const centerY = positioned.reduce((sum, hand) => sum + hand.center.y, 0) / positioned.length;
+  state.handX = centerX;
+  state.handY = centerY;
+
+  // 只有负责花朵姿态的手才产生风；指向手用于移光，不会顺带吹动花朵
+  if (controls.length) {
+    const controlX = centerX;
+    if (state.windPrevX !== null && state.windPrevAt > 0) {
+      const deltaSeconds = Math.max(0.012, (now - state.windPrevAt) / 1000);
+      const visualVelocity = -(controlX - state.windPrevX) / deltaSeconds;
+      state.windForce = clamp(state.windForce + visualVelocity * 0.55, -4.2, 4.2);
+    }
+    state.windPrevX = controlX;
+    state.windPrevAt = now;
+  } else {
+    state.windPrevX = null;
+    state.windPrevAt = 0;
   }
 }
 
@@ -2250,31 +2417,40 @@ function drawCam(res) {
   camctx.fillStyle = vg;
   camctx.fillRect(0, 0, w, h);
 
-  if (!res || !res.landmarks || !res.landmarks.length) return;
+  const maxHands = state.twoHandMode ? 2 : 1;
+  const hands = res && res.landmarks ? res.landmarks.slice(0, maxHands) : [];
+  handTrackLabel.textContent = `${hands.length}/${maxHands} HANDS`;
+  if (!hands.length) return;
 
-  const lm = res.landmarks[0];
-  const px = (i) => [(1 - lm[i].x) * w, lm[i].y * h];
+  const handColors = [
+    ['rgba(255,120,155,.96)', 'rgba(255,90,140,.95)', 'rgba(255,215,230,.98)'],
+    ['rgba(192,150,255,.96)', 'rgba(145,100,255,.95)', 'rgba(225,210,255,.98)']
+  ];
+  hands.forEach((lm, handIndex) => {
+    const px = (i) => [(1 - lm[i].x) * w, lm[i].y * h];
+    const colors = handColors[handIndex] || handColors[0];
 
-  camctx.lineWidth = 1.6;
-  camctx.strokeStyle = 'rgba(255,120,155,.92)';
-  camctx.shadowColor = 'rgba(255,90,140,.9)';
-  camctx.shadowBlur = 7;
-  camctx.beginPath();
-  for (const [a, b] of HAND_CONN) {
-    const [ax, ay] = px(a), [bx, by] = px(b);
-    camctx.moveTo(ax, ay);
-    camctx.lineTo(bx, by);
-  }
-  camctx.stroke();
-
-  camctx.shadowBlur = 5;
-  camctx.fillStyle = 'rgba(255,205,220,.95)';
-  for (let i = 0; i < lm.length; i++) {
-    const [x, y] = px(i);
+    camctx.lineWidth = handIndex === 0 ? 1.8 : 1.6;
+    camctx.strokeStyle = colors[0];
+    camctx.shadowColor = colors[1];
+    camctx.shadowBlur = 8;
     camctx.beginPath();
-    camctx.arc(x, y, i % 4 === 0 ? 2.2 : 1.5, 0, Math.PI * 2);
-    camctx.fill();
-  }
+    for (const [a, b] of HAND_CONN) {
+      const [ax, ay] = px(a), [bx, by] = px(b);
+      camctx.moveTo(ax, ay);
+      camctx.lineTo(bx, by);
+    }
+    camctx.stroke();
+
+    camctx.shadowBlur = 5;
+    camctx.fillStyle = colors[2];
+    for (let i = 0; i < lm.length; i++) {
+      const [x, y] = px(i);
+      camctx.beginPath();
+      camctx.arc(x, y, i % 4 === 0 ? 2.3 : 1.5, 0, Math.PI * 2);
+      camctx.fill();
+    }
+  });
   camctx.shadowBlur = 0;
 }
 
@@ -2354,7 +2530,7 @@ function frame(now) {
   let spinTgt = 0, scaleTgt = 1;
   let ptx = 0, pty = 0;
   if (state.mouseMode) {
-    spinTgt = clamp((state.mouseX / window.innerWidth - 0.5) * 1.15, -0.55, 0.55);
+    spinTgt = clamp((state.mouseX / window.innerWidth - 0.5) * 1.9, -1.05, 1.05);
     ptx = (state.mouseX / window.innerWidth - 0.5) * 2;
     pty = -(state.mouseY / window.innerHeight - 0.5) * 2;
   } else if (state.handActive) {
@@ -2365,6 +2541,17 @@ function frame(now) {
   }
   state.spin += (spinTgt - state.spin) * Math.min(1, dt * 6.5);
   state.scale += (scaleTgt - state.scale) * Math.min(1, dt * 3.2);
+
+  // 横扫风：二维阻尼弹簧，手停下后花朵先过冲再回摆
+  state.windVel += (state.windForce - state.wind * 34 - state.windVel * 6.5) * dt;
+  state.wind = clamp(state.wind + state.windVel * dt, -1.25, 1.25);
+  state.windForce *= Math.pow(0.045, dt);
+
+  // 指尖光源：低通平滑，避免 landmark 抖动让高光闪烁
+  const lightK = Math.min(1, dt * 9);
+  state.light.x += (state.lightTarget.x - state.light.x) * lightK;
+  state.light.y += (state.lightTarget.y - state.light.y) * lightK;
+  state.lightAmt += (state.lightTargetAmt - state.lightAmt) * Math.min(1, dt * 7);
 
   // 视差
   state.parTarget.x = clamp(ptx, -1, 1) * 1.1;
@@ -2424,6 +2611,9 @@ function frame(now) {
   gl.uniform2f(loc.par, state.par.x, state.par.y);
   gl.uniform1f(loc.spin, state.spin);
   gl.uniform1f(loc.scale, state.scale);
+  gl.uniform1f(loc.wind, state.wind);
+  gl.uniform2f(loc.light, state.light.x, state.light.y);
+  gl.uniform1f(loc.lightAmt, state.lightAmt);
 
   gl.drawArrays(gl.POINTS, 0, drawCount);
 
@@ -2490,12 +2680,37 @@ window.__debug = {
   setHand(open = 0.75, spin = 0, scale = 1) {
     state.mouseMode = false;
     state.handActive = true;
+    state.handCount = 1;
     state.target = clamp(open, 0, 1);
-    state.spinTarget = clamp(spin, -0.90, 0.90);
-    state.scaleTarget = clamp(scale, 0.84, 1.16);
+    state.spinTarget = clamp(spin, -1.35, 1.35);
+    state.scaleTarget = clamp(scale, 0.68, 1.35);
+  },
+  setHands(open = 0.8, spin = 0, scale = 1.05) {
+    state.mouseMode = false;
+    state.twoHandMode = true;
+    state.handActive = true;
+    state.handCount = 2;
+    state.target = clamp(open, 0, 1);
+    state.spinTarget = clamp(spin, -1.35, 1.35);
+    state.scaleTarget = clamp(scale, 0.68, 1.35);
+    syncHandModeButton();
+  },
+  setWind(value = 1) {
+    state.wind = clamp(value, -1.25, 1.25);
+    state.windForce = 0;
+    state.windVel = 0;
+  },
+  setLight(x = 0.35, y = 0.2, amount = 1) {
+    state.pointing = amount > 0;
+    state.lightTarget.x = clamp(x, -1, 1);
+    state.lightTarget.y = clamp(y, -1, 1);
+    state.lightTargetAmt = clamp(amount, 0, 1);
   },
   clearHand() {
     state.handActive = false;
+    state.handCount = 0;
+    state.pointing = false;
+    state.lightTargetAmt = 0;
     state.target = 0.10;
     state.spinTarget = 0;
     state.scaleTarget = 1;
