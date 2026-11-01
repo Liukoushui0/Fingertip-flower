@@ -77,7 +77,7 @@
   @keyframes blink{0%,100%{opacity:1}50%{opacity:.28}}
 
   /* 底部提示 */
-  .hint{position:absolute;left:50%;bottom:26px;transform:translateX(-50%);display:flex;align-items:center;gap:34px}
+  .hint{position:absolute;left:50%;bottom:26px;transform:translateX(-50%);display:flex;align-items:center;gap:24px}
   .hint .it{display:flex;align-items:center;gap:9px;opacity:.55;transition:opacity .4s}
   .hint .it.act{opacity:1}
   .hint .it svg{width:17px;height:17px;flex:none;stroke:rgba(255,215,230,.8);fill:none;stroke-width:1.3}
@@ -349,6 +349,15 @@
       </svg>
       <div><div class="k">左右转手</div><div class="d">旋转花盘 · 远近缩放</div></div>
     </div>
+    <div class="sep"></div>
+    <div class="it" id="hBurst">
+      <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3.5v4M12 16.5v4M3.5 12h4M16.5 12h4"/>
+        <path d="m6 6 2.8 2.8M15.2 15.2 18 18M18 6l-2.8 2.8M8.8 15.2 6 18"/>
+        <circle cx="12" cy="12" r="2.2"/>
+      </svg>
+      <div><div class="k">快速握张</div><div class="d">震屏 · 散花重聚</div></div>
+    </div>
   </div>
 
   <div class="tools">
@@ -454,7 +463,7 @@ const rnd = (a, b) => a + Math.random() * (b - a);
 const L = 1.0;
 
 const P_BUD = [], P_OPEN = [], P_COL = [], P_SIZE = [], P_SEED = [], P_DELAY = [], P_KIND = [];
-let CUR_KIND = 0;   // 0=花瓣 1=花心 2=花粉
+let CUR_KIND = 0;   // 0=花瓣 1=花心 2=花粉 3=落瓣 4=风线
 
 function addP(bud, open, col, size, delay) {
   P_BUD.push(bud[0], bud[1], bud[2]);
@@ -689,6 +698,26 @@ for (let i = 0; i < 520; i++) {
   addP(bud, open, [col[0] * f, col[1] * f, col[2] * f], rnd(1.0, 1.9), rnd(0, 0.12));
 }
 
+CUR_KIND = 4;
+// —— 流风碎光：只在有风时明显出现，点精灵在片元着色器中拉成横向光丝
+for (let i = 0; i < 1700; i++) {
+  const angle = Math.random() * Math.PI * 2;
+  const radius = 0.48 + Math.pow(Math.random(), 0.62) * 1.42;
+  const height = rnd(-0.55, 0.72);
+  const ox = Math.cos(angle) * radius;
+  const oy = height;
+  const oz = Math.sin(angle) * radius;
+  const col = [1.0, rnd(0.28, 0.58), rnd(0.42, 0.78)];
+  const f = rnd(0.05, 0.24);
+  addP(
+    [ox * 0.17, oy * 0.22 - 0.02, oz * 0.17],
+    [ox, oy, oz],
+    [col[0] * f, col[1] * f, col[2] * f],
+    rnd(1.2, 3.8),
+    rnd(0.02, 0.34)
+  );
+}
+
 /* ---------------- 2. WebGL ---------------- */
 const canvas = document.getElementById('gl');
 const gl = canvas.getContext('webgl', {
@@ -797,6 +826,7 @@ uniform float uPulse;
 uniform float uHue;
 uniform float uBeat;
 uniform float uBurst;
+uniform vec2 uShake;
 uniform float uTime;
 uniform vec2  uRes;
 uniform float uPx;
@@ -807,12 +837,15 @@ uniform float uIntro;
 uniform vec2  uPar;
 uniform float uSpin;
 uniform float uScale;
+uniform float uTumble;
+uniform float uScatter;
 uniform float uWind;
 uniform vec2  uLight;
 uniform float uLightAmt;
 
 varying vec3 vCol;
 varying float vA;
+varying float vKind;
 
 /* ---- HSL 色相旋转（先归一化色度，避免暗部变灰） ---- */
 vec3 rgb2hsl(vec3 c){
@@ -899,13 +932,26 @@ void main(){
 
   // 落瓣：从花瓣上慢慢脱离、飘落、淡出
   float fallFade = 1.0;
-  if (aKind > 2.5) {
+  if (aKind > 2.5 && aKind < 3.5) {
     float f = fract(uTime * 0.052 + aSeed * 3.71);
     f = f * f;
     p.y -= f * 1.55;
     p.x += sin(uTime * 0.78 + aSeed * 21.0) * f * 0.26;
     p.z += cos(uTime * 0.61 + aSeed * 17.0) * f * 0.20;
     fallFade = (1.0 - f) * smoothstep(0.42, 0.92, uBloom);
+  }
+
+  // 流风碎光：随横扫方向持续流动，风越大越亮、越长
+  if (aKind > 3.5) {
+    float flow = fract(uTime * 0.16 + aSeed * 8.73);
+    float side = uWind >= 0.0 ? 1.0 : -1.0;
+    p.x += side * flow * (0.72 + abs(uWind) * 1.45);
+    p.x += sin(uTime * 0.72 + aSeed * 17.0) * 0.16;
+    p.y += cos(uTime * 0.91 + aSeed * 21.0) * 0.20;
+    p.z += sin(uTime * 0.63 + aSeed * 13.0) * 0.18;
+    fallFade = smoothstep(0.0, 0.13, flow)
+      * (1.0 - smoothstep(0.66, 1.0, flow))
+      * (0.01 + abs(uWind) * 1.22);
   }
 
   // 音乐：整朵花随低频轻轻胀缩
@@ -919,6 +965,20 @@ void main(){
   float spinS = sin(uSpin);
   p.xy = vec2(p.x * spinC - p.y * spinS, p.x * spinS + p.y * spinC);
   p *= uScale;
+
+  // 左右翻滚：绕竖直轴旋转，让花盘真正侧翻而不只是屏幕内旋转
+  float tumbleC = cos(uTumble);
+  float tumbleS = sin(uTumble);
+  p.xz = vec2(p.x * tumbleC + p.z * tumbleS, -p.x * tumbleS + p.z * tumbleC);
+
+  // 爆发散开：沿随机径向与独立噪声方向飞散，uScatter 归零时精确重聚
+  vec3 scatterDir = normalize(p * 0.72 + vec3(
+    sin(aSeed * 31.0),
+    cos(aSeed * 27.0) * 0.82,
+    sin(aSeed * 19.0)
+  ) + vec3(0.0001));
+  p += scatterDir * uScatter * (0.45 + aSeed * 1.05);
+  p.y += sin(aSeed * 43.0 + uTime * 2.2) * uScatter * 0.18;
 
   // 俯视花盘：约 38° 俯角，花盘正对屏幕，层次清楚不散
   float ang = -0.66;
@@ -947,7 +1007,7 @@ void main(){
 
   // 景深：远处更小更淡，近处更大更实
   float dof = smoothstep(-1.25, 0.85, q.z);
-  gl_PointSize = aSize * uDpr * uPxK * persp * (0.62 + 0.62 * dof);
+  gl_PointSize = aSize * uDpr * uPxK * persp * (0.88 + 0.70 * dof);
 
   // 花心保持暖色（只轻微跟随），花瓣与花粉完整换色
   float hueAmt = (aKind > 0.5 && aKind < 1.5) ? uHue * 0.22 : uHue;
@@ -956,21 +1016,31 @@ void main(){
     + vec3(1.0, 0.55, 0.30) * lightFocus * 0.36;
   vA = clamp(0.30 + 0.78 * dof, 0.10, 1.0)
     * smoothstep(0.0, 0.55, it) * fallFade * (1.0 + lightFocus * 0.34);
+  vKind = aKind;
 }`;
 
 const PT_FS = `
 precision highp float;
 varying vec3 vCol;
 varying float vA;
+varying float vKind;
 void main(){
   vec2 d = gl_PointCoord - 0.5;
+  if (vKind > 3.5) {
+    d.x *= 0.30;                    // 风线压成横向光丝
+    float r = length(d) * 2.0;
+    if (r > 1.0) discard;
+    float a = 1.0 - r;
+    gl_FragColor = vec4(vCol * a * a * vA, 1.0);
+    return;
+  }
   float r = length(d) * 2.0;
   if (r > 1.0) discard;
   float a = 1.0 - r;
-  // 核心亮、边缘柔的软光斑
-  float core = a * a;
-  float soft = core * core * (0.62 + 0.38 * core);
-  gl_FragColor = vec4(vCol * (soft + core * 0.55) * vA, 1.0);
+  // 硬核心 + 很窄的柔边；大范围柔光交给后处理，避免整朵花发糊
+  float core = 1.0 - smoothstep(0.02, 0.58, r);
+  float soft = (1.0 - smoothstep(0.78, 1.0, r)) * 0.20;
+  gl_FragColor = vec4(vCol * (core * 1.08 + soft) * vA, 1.0);
 }`;
 
 /* ---------- 后处理：亮部提取 / 高斯模糊 / 合成 ---------- */
@@ -1028,7 +1098,7 @@ vec3 aces(vec3 x){
 float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 
 void main(){
-  vec2 uv = vUv;
+  vec2 uv = clamp(vUv + uShake, vec2(0.001), vec2(0.999));
   vec2 cc = uv - 0.5;
   float r2 = dot(cc, cc);
 
@@ -1116,6 +1186,7 @@ const postLoc = {
     intro: gl.getUniformLocation(compProg, 'uIntro'),
     beat: gl.getUniformLocation(compProg, 'uBeat'),
     burst: gl.getUniformLocation(compProg, 'uBurst'),
+    shake: gl.getUniformLocation(compProg, 'uShake'),
     pos: gl.getAttribLocation(compProg, 'aPos')
   }
 };
@@ -1226,6 +1297,8 @@ const loc = {
   par: gl.getUniformLocation(ptProg, 'uPar'),
   spin: gl.getUniformLocation(ptProg, 'uSpin'),
   scale: gl.getUniformLocation(ptProg, 'uScale'),
+  tumble: gl.getUniformLocation(ptProg, 'uTumble'),
+  scatter: gl.getUniformLocation(ptProg, 'uScatter'),
   wind: gl.getUniformLocation(ptProg, 'uWind'),
   light: gl.getUniformLocation(ptProg, 'uLight'),
   lightAmt: gl.getUniformLocation(ptProg, 'uLightAmt'),
@@ -1235,6 +1308,8 @@ const loc = {
 
 let W = 1, H = 1, DPR = 1;
 let DPRCAP = 2;   // 自适应画质：低帧时降到 1
+const COARSE_POINTER = !!(window.matchMedia && matchMedia('(pointer:coarse)').matches);
+const MIN_RENDER_DPR = COARSE_POINTER ? 1 : 1.5;
 
 // 截图专用的临时提清晰度：降级状态下保存，图会跟着变糊，
 // 所以点保存时先把分辨率和粒子数临时拉满，截完再还原。
@@ -1243,7 +1318,8 @@ let shotBoostDraw = 0;
 let qualityLock = false;   // 截图期间锁住自适应降级，否则刚提上来又被降回去
 
 function resize() {
-  DPR = Math.min(window.devicePixelRatio || 1, DPRCAP);
+  // 桌面低 DPI 也做轻微超采样；性能不足时也不低于 1.25，避免明显发糊
+  DPR = Math.min(Math.max(window.devicePixelRatio || 1, MIN_RENDER_DPR), DPRCAP);
   W = Math.floor(window.innerWidth * DPR);
   H = Math.floor(window.innerHeight * DPR);
   canvas.width = W; canvas.height = H;
@@ -1281,6 +1357,9 @@ const state = {
   parTarget: { x: 0, y: 0 },
   spin: 0, spinTarget: 0,               // 手掌滚转 → 花朵旋转
   scale: 1, scaleTarget: 1,             // 手掌远近 → 花朵缩放
+  tumble: 0, tumbleTarget: 0,           // 横向位置 → 左右立体翻滚
+  scatter: 0, shakeX: 0, shakeY: 0,     // 特殊动作：震颤与散花
+  specialStart: -1, specialCooldownUntil: 0, burstGestureLowAt: 0,
   pinchArmed: true, lastPinchAt: 0,
   gestureNote: '', gestureNoteUntil: 0,
   twoHandMode: false,
@@ -1300,6 +1379,7 @@ const campanel = document.getElementById('campanel');
 const hFist = document.getElementById('hFist');
 const hOpen = document.getElementById('hOpen');
 const hTurn = document.getElementById('hTurn');
+const hBurst = document.getElementById('hBurst');
 const btnHands = document.getElementById('btnHands');
 const handModeText = document.getElementById('handModeText');
 const handTrackLabel = document.getElementById('handTrackLabel');
@@ -1310,6 +1390,7 @@ const IS_TOUCH = (window.matchMedia && matchMedia('(pointer:coarse)').matches)
 // iOS / iPadOS（iPadOS 13+ 的 UA 伪装成 Mac，靠触点数区分）
 const IS_IOS = /iPhone|iPad|iPod/i.test(navigator.userAgent)
   || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const REDUCE_MOTION = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 
 // 手机性能预算：音乐连续性比满粒子更重要。
 // 原先 116k 粒子 × DPR2 的后处理会和 CPU 手势识别抢主线程 / GPU，
@@ -1337,21 +1418,35 @@ function updateUI() {
   bdot.className = 'dot' + (gi === 0 ? ' calm' : '');
 
   if (state.mouseMode) {
+    const specialActive = state.specialStart >= 0;
     // 手机上没有"指针"，说手指更自然
-    hname.textContent = IS_TOUCH
-      ? (gi === 0 ? '手指收拢' : gi === 1 ? '半开 · 舒展' : '完全绽放')
-      : (gi === 0 ? '指针收拢' : gi === 1 ? '指针半开' : '指针舒展');
+    hname.textContent = specialActive
+      ? (state.scatter > 0.82 ? '花瓣散开' : '震屏冲击')
+      : (IS_TOUCH
+        ? (gi === 0 ? '手指收拢' : gi === 1 ? '半开 · 舒展' : '完全绽放')
+        : (gi === 0 ? '指针收拢' : gi === 1 ? '指针半开' : '指针舒展'));
     const rot = Math.round(state.spin * 180 / Math.PI);
-    hconf.textContent = '开合 ' + Math.round(g * 100) + '% · 旋转 '
-      + (rot > 0 ? '+' : '') + rot + '°';
+    const roll = Math.round(state.tumble * 180 / Math.PI);
+    hconf.textContent = specialActive
+      ? (state.scatter > 0.82 ? '粒子飞散 · 自动重聚' : '屏幕震颤 · 准备散花')
+      : ('开合 ' + Math.round(g * 100) + '% · 旋转 '
+        + (rot > 0 ? '+' : '') + rot + '° · 翻滚 '
+        + (roll > 0 ? '+' : '') + roll + '°');
   } else if (state.handActive) {
+    const specialActive = state.specialStart >= 0;
     const pointing = state.pointing && state.lightAmt > 0.05;
-    hname.textContent = pointing
-      ? '指尖移光'
-      : (state.twoHandMode && state.handCount < 2
-        ? '等待第二只手'
-        : (state.twoHandMode ? '双手 · ' + GESTURE_NAME[gi] : GESTURE_NAME[gi]));
-    if (performance.now() < state.gestureNoteUntil) {
+    hname.textContent = specialActive
+      ? (state.scatter > 0.82 ? '花瓣散开' : '震屏冲击')
+      : (pointing
+        ? '指尖移光'
+        : (state.twoHandMode && state.handCount < 2
+          ? '等待第二只手'
+          : (state.twoHandMode ? '双手 · ' + GESTURE_NAME[gi] : GESTURE_NAME[gi])));
+    if (specialActive) {
+      hconf.textContent = state.scatter > 0.82
+        ? '粒子飞散 · 自动重聚'
+        : '屏幕震颤 · 准备散花';
+    } else if (performance.now() < state.gestureNoteUntil) {
       hconf.textContent = state.gestureNote;
     } else if (pointing) {
       hconf.textContent = '食指指向 · 光源跟随';
@@ -1359,8 +1454,10 @@ function updateUI() {
       hconf.textContent = '检测到 1/2 只手 · 单手临时控制';
     } else {
       const rot = Math.round(state.spin * 180 / Math.PI);
+      const roll = Math.round(state.tumble * 180 / Math.PI);
       hconf.textContent = '开合 ' + Math.round(g * 100) + '% · 旋转 '
-        + (rot > 0 ? '+' : '') + rot + '° · 缩放 '
+        + (rot > 0 ? '+' : '') + rot + '° · 翻滚 '
+        + (roll > 0 ? '+' : '') + roll + '° · 缩 '
         + Math.round(state.scale * 100) + '%';
     }
   } else {
@@ -1371,8 +1468,9 @@ function updateUI() {
   hFist.classList.toggle('act', gi === 0);
   hOpen.classList.toggle('act', gi === 2);
   hTurn.classList.toggle('act',
-    Math.abs(state.spin) > 0.08 || Math.abs(state.wind) > 0.08
+    Math.abs(state.spin) > 0.08 || Math.abs(state.tumble) > 0.08 || Math.abs(state.wind) > 0.08
     || state.lightAmt > 0.08 || performance.now() < state.gestureNoteUntil);
+  hBurst.classList.toggle('act', state.specialStart >= 0);
 }
 
 /* ---------- 鼠标 / 触摸模式 ---------- */
@@ -1407,6 +1505,9 @@ window.addEventListener('touchstart', (e) => {
   if (!state.mouseMode) return;
   state.pointer = pointerToBloom(e.touches[0].clientY);
 }, { passive: true });
+canvas.addEventListener('dblclick', () => {
+  triggerSpecialBurst(performance.now(), '双击触发');
+});
 
 /* ---------- 全屏 ---------- */
 const btnFull = document.getElementById('btnFull');
@@ -1435,6 +1536,7 @@ function setHintMode(isMouse) {
   const kF = hFist.querySelector('.k'), dF = hFist.querySelector('.d');
   const kO = hOpen.querySelector('.k'), dO = hOpen.querySelector('.d');
   const kT = hTurn.querySelector('.k'), dT = hTurn.querySelector('.d');
+  const kB = hBurst.querySelector('.k'), dB = hBurst.querySelector('.d');
   if (isMouse) {
     kF.textContent = IS_TOUCH ? '手指下滑' : '向下移动';
     dF.textContent = '收拢 · 花苞';
@@ -1442,6 +1544,8 @@ function setHintMode(isMouse) {
     dO.textContent = IS_TOUCH ? '控制花开 · 跟随手指' : '控制花开 · 跟随指针';
     kT.textContent = IS_TOUCH ? '左右滑动' : '左右移动';
     dT.textContent = '旋转花盘';
+    kB.textContent = '双击画面';
+    dB.textContent = '震屏 · 散花重聚';
   } else {
     kF.textContent = '握拳';
     dF.textContent = '收拢 · 花苞';
@@ -1451,6 +1555,8 @@ function setHintMode(isMouse) {
     dT.textContent = state.twoHandMode
       ? '间距缩放 · 中点带风 · 指食移光'
       : '旋转花盘 · 风与惯性 · 指食移光';
+    kB.textContent = '快速握张';
+    dB.textContent = '震屏 · 散花重聚';
   }
 }
 
@@ -2094,6 +2200,8 @@ async function startCamera(fromUserTap) {
   state.mouseMode = false;
   state.camFailed = false;
   state.ready = true;
+  state.gestureNote = '快速握拳再张开 · 触发散花重聚';
+  state.gestureNoteUntil = performance.now() + 3000;
   btnMouse.classList.remove('on');
   btnMouse.lastChild.textContent = IS_TOUCH ? '手指模式' : '鼠标模式';
   btnMouse.style.display = '';   // 手势模式恢复了，允许切回去
@@ -2205,6 +2313,7 @@ function startDetect() {
         state.pointing = false;
         state.lightTargetAmt = 0;
         state.windPrevX = null;
+        state.burstGestureLowAt = 0;
         state.target = 0.10;
         state.spinTarget = 0;
         state.scaleTarget = 1;
@@ -2296,6 +2405,37 @@ function updatePinchColor(lm, open, now) {
   }
 }
 
+function triggerSpecialBurst(now = performance.now(), source = '握张动作') {
+  if (now < state.specialCooldownUntil) return false;
+  state.specialStart = now;
+  state.specialCooldownUntil = now + 6200;
+  state.burstGestureLowAt = 0;
+  state.burst = 1.5;
+  state.pulse = 1;
+  state.target = 1;
+  state.pointer = 1;
+  state.gestureNote = source + ' · 散花重聚';
+  state.gestureNoteUntil = now + 1800;
+  return true;
+}
+
+// 快速握拳后张开：单手模式一只手完成；双手模式要求两只手同时完成
+function detectSpecialGesture(open, handCount, now) {
+  const required = state.twoHandMode ? 2 : 1;
+  if (handCount < required) {
+    state.burstGestureLowAt = 0;
+    return;
+  }
+  if (open <= 0.22) {
+    state.burstGestureLowAt = now;
+    return;
+  }
+  if (open >= 0.78 && state.burstGestureLowAt > 0
+      && now - state.burstGestureLowAt < 720) {
+    triggerSpecialBurst(now, state.twoHandMode ? '双手握张' : '握张动作');
+  }
+}
+
 function handCenter(lm) {
   return {
     x: (lm[0].x + lm[9].x) * 0.5,
@@ -2353,7 +2493,9 @@ function applyHandFrame(res, now) {
   // 指向手暂时退出花朵姿态控制，另一只手继续控制；只有单指指向时才冻结花朵
   const controls = analyses.filter(hand => !hand.pointing);
   if (controls.length) {
-    state.target = controls.reduce((sum, hand) => sum + hand.open, 0) / controls.length;
+    const controlOpen = controls.reduce((sum, hand) => sum + hand.open, 0) / controls.length;
+    state.target = controlOpen;
+    detectSpecialGesture(controlOpen, controls.length, now);
     state.spinTarget = controls.reduce((sum, hand) => sum + hand.motion.spin, 0) / controls.length;
 
     if (state.twoHandMode && count >= 2) {
@@ -2491,11 +2633,13 @@ function frame(now) {
     frame._pn = (frame._pn || 0) + 1;
     if (frame._pn >= 100) {
       const avg = frame._pa / frame._pn;
-      if (avg > 0.036 && DPRCAP > 1) {          // 低于约 28fps
-        DPRCAP = 1;
+      if (avg > 0.036 && drawCount > COUNT * 0.92) {
+        drawCount = Math.floor(COUNT * 0.90);   // 先少量抽稀，优先保住清晰度
+      } else if (avg > 0.043 && DPRCAP > MIN_RENDER_DPR) {
+        DPRCAP = MIN_RENDER_DPR;                // 再降分辨率，但保留超采样
         resize();
-      } else if (avg > 0.042 && drawCount > COUNT * 0.55) {
-        drawCount = Math.floor(COUNT * 0.62);   // 还是卡就抽稀
+      } else if (avg > 0.058 && drawCount > COUNT * 0.80) {
+        drawCount = Math.floor(COUNT * 0.78);   // 最后才做更大比例的抽稀
       }
       frame._pa = 0; frame._pn = 0;
     }
@@ -2526,8 +2670,43 @@ function frame(now) {
   state.prevBloomForBurst = state.bloom;
   state.burst *= Math.pow(0.015, dt);
 
+  // 特殊动作：握张后整屏震颤，粒子散开数秒再精确重聚
+  if (state.specialStart >= 0) {
+    const specialTime = (now - state.specialStart) / 1000;
+    if (specialTime >= 4.4) {
+      state.specialStart = -1;
+      state.scatter = 0;
+      state.shakeX = 0;
+      state.shakeY = 0;
+      if (!REDUCE_MOTION) ui.style.transform = '';
+    } else {
+      const shakeEnvelope = specialTime < 0.46
+        ? Math.exp(-specialTime * 7.2) * (1 - specialTime / 0.46)
+        : 0;
+      state.shakeX = REDUCE_MOTION ? 0 : Math.sin(now * 0.19) * 0.0062 * shakeEnvelope;
+      state.shakeY = REDUCE_MOTION ? 0 : Math.cos(now * 0.23) * 0.0048 * shakeEnvelope;
+      if (specialTime < 0.68) {
+        state.scatter = smoothstep(clamp((specialTime - 0.10) / 0.58, 0, 1));
+      } else if (specialTime < 2.65) {
+        state.scatter = 1;
+      } else {
+        state.scatter = 1 - smoothstep(clamp((specialTime - 2.65) / 1.58, 0, 1));
+      }
+      if (REDUCE_MOTION) state.scatter *= 0.32;
+      state.burst = Math.max(state.burst, state.scatter * 0.62);
+      state.pulse = Math.max(state.pulse, state.scatter * 0.38);
+      if (!REDUCE_MOTION) {
+        ui.style.transform = `translate3d(${(state.shakeX * 5200).toFixed(2)}px,${(state.shakeY * 5200).toFixed(2)}px,0)`;
+      }
+    }
+  } else {
+    state.scatter = 0;
+    state.shakeX = 0;
+    state.shakeY = 0;
+  }
+
   // 旋转与缩放目标：鼠标横移 / 手掌滚转与远近
-  let spinTgt = 0, scaleTgt = 1;
+  let spinTgt = 0, scaleTgt = 1, tumbleTgt = 0;
   let ptx = 0, pty = 0;
   if (state.mouseMode) {
     spinTgt = clamp((state.mouseX / window.innerWidth - 0.5) * 1.9, -1.05, 1.05);
@@ -2539,8 +2718,10 @@ function frame(now) {
     ptx = (0.5 - state.handX) * 2;
     pty = (state.handY - 0.5) * 2;
   }
+  tumbleTgt = clamp(ptx * 0.82, -0.92, 0.92);
   state.spin += (spinTgt - state.spin) * Math.min(1, dt * 6.5);
   state.scale += (scaleTgt - state.scale) * Math.min(1, dt * 3.2);
+  state.tumble += (tumbleTgt - state.tumble) * Math.min(1, dt * 5.2);
 
   // 横扫风：二维阻尼弹簧，手停下后花朵先过冲再回摆
   state.windVel += (state.windForce - state.wind * 34 - state.windVel * 6.5) * dt;
@@ -2611,6 +2792,8 @@ function frame(now) {
   gl.uniform2f(loc.par, state.par.x, state.par.y);
   gl.uniform1f(loc.spin, state.spin);
   gl.uniform1f(loc.scale, state.scale);
+  gl.uniform1f(loc.tumble, state.tumble);
+  gl.uniform1f(loc.scatter, state.scatter);
   gl.uniform1f(loc.wind, state.wind);
   gl.uniform2f(loc.light, state.light.x, state.light.y);
   gl.uniform1f(loc.lightAmt, state.lightAmt);
@@ -2626,7 +2809,7 @@ function frame(now) {
   gl.bindTexture(gl.TEXTURE_2D, fboScene.tex);
   gl.uniform1i(postLoc.bright.tex, 0);
   gl.uniform2f(postLoc.bright.texel, 1 / W, 1 / H);
-  gl.uniform1f(postLoc.bright.thr, 0.62);
+  gl.uniform1f(postLoc.bright.thr, 0.84);
   drawQuad(postLoc.bright.pos);
 
   /* ---------- Pass 3：分离式高斯模糊（两轮） ---------- */
@@ -2660,10 +2843,11 @@ function frame(now) {
 
   gl.uniform2f(postLoc.comp.res, W, H);
   gl.uniform1f(postLoc.comp.time, time);
-  gl.uniform1f(postLoc.comp.amt, 0.62);
+  gl.uniform1f(postLoc.comp.amt, 0.34);
   gl.uniform1f(postLoc.comp.intro, state.intro);
   gl.uniform1f(postLoc.comp.beat, state.beat);
   gl.uniform1f(postLoc.comp.burst, state.burst);
+  gl.uniform2f(postLoc.comp.shake, state.shakeX, state.shakeY);
   drawQuad(postLoc.comp.pos);
   gl.activeTexture(gl.TEXTURE0);
 
@@ -2705,6 +2889,14 @@ window.__debug = {
     state.lightTarget.x = clamp(x, -1, 1);
     state.lightTarget.y = clamp(y, -1, 1);
     state.lightTargetAmt = clamp(amount, 0, 1);
+  },
+  setTumble(value = 0.6) {
+    state.tumble = clamp(value, -0.92, 0.92);
+    state.tumbleTarget = state.tumble;
+  },
+  burst() {
+    state.specialCooldownUntil = 0;
+    return triggerSpecialBurst(performance.now(), '预览触发');
   },
   clearHand() {
     state.handActive = false;
